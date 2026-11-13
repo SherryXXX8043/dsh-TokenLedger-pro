@@ -1,12 +1,16 @@
 {
-  "name": "dsh-tokenledger",
-  "version": "0.1.1-blue.0",
-  "description": "Token usage accounting for DeepSeek Harness, attributed to the relay site that served each request — no configuration, no credentials",
+  "name": "dsh-tokenledger-pro",
+  "version": "0.1.0-pro.0",
+  "description": "Independent TokenLedger fork for DeepSeek Harness: token usage, balances and provider adaptations",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/zh667/TokenLedger.git"
+    "url": "https://github.com/SherryXXX8043/dsh-TokenLedger-pro.git"
+  },
+  "homepage": "https://github.com/SherryXXX8043/dsh-TokenLedger-pro#readme",
+  "bugs": {
+    "url": "https://github.com/SherryXXX8043/dsh-TokenLedger-pro/issues"
   },
   "exports": {
     ".": "./src/index.js",
@@ -35,6 +39,8 @@
     "LICENSE",
     "NOTICE",
     "README.md",
+    "CHANGELOG.md",
+    "docs/PRO-MIGRATION.md",
     "docs/BLUE-MIGRATION.md",
     "docs/images"
   ],

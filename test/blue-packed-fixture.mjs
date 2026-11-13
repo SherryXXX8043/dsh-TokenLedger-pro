@@ -6,7 +6,7 @@
  * closure with lifecycle scripts disabled. Runtime scenarios
  * execute in a throwaway npm project and import package names only.
  *
- * @module dsh-tokenledger/blue-packed-fixture
+ * @module dsh-tokenledger-pro/blue-packed-fixture
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -63,7 +63,7 @@ const fixtureRoot = await mkdtemp(join(tmpdir(), "tokenledger-blue-fixture-"));
 const tarballRoot = join(fixtureRoot, "tarballs");
 
 const report = {
-	package: "dsh-tokenledger",
+	package: "dsh-tokenledger-pro",
 	harnessLine: requestedHarnessLine ?? null,
 	peerResolution: "normal",
 	blueRepository: {
@@ -324,7 +324,7 @@ function summarizeHarness(instances) {
 		const sentinel = "__TOKENLEDGER_BLUE_ENTRY_PROBE__";
 		const probePath = join(fixtureRoot, ".entry-probe.mjs");
 		writeFileSync(probePath, [
-			`const plugin = await import(${JSON.stringify("dsh-tokenledger")})`,
+			`const plugin = await import(${JSON.stringify("dsh-tokenledger-pro")})`,
 			`process.stdout.write(${JSON.stringify(sentinel)} + JSON.stringify({ name: plugin.name, apply: typeof plugin.apply }) + "\\n")`,
 			""
 		].join("\n"));

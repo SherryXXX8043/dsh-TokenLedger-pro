@@ -1,6 +1,6 @@
 # The TokenLedger bundle patch.
 #
-# Adding `dsh-tokenledger` to a profile's `dsh.profile.bundles` applies this
+# Adding `dsh-tokenledger-pro` to a profile's `dsh.profile.bundles` applies this
 # automatically — there is no YAML for a user to hand-write.
 #
 # It works with no configuration at all: every call attributes to `direct` and
@@ -26,12 +26,12 @@
 
 # The entry name is the BARE package name, deliberately. The client-module
 # scanner treats it as a package specifier and resolves `<name>/package.json`;
-# a subpath such as `dsh-tokenledger/plugin` fails that resolve, is cached as
+# a subpath such as `dsh-tokenledger-pro/plugin` fails that resolve, is cached as
 # "not a client package", and the panel silently never loads.
 - insert:
-    - id: tokenledger
-      name: dsh-tokenledger
+    - id: tokenledger-pro
+      name: dsh-tokenledger-pro
       config:
-        database: !!js dshHomePath('tokenledger.sqlite')
+        database: !!js dshHomePath('tokenledger-pro.sqlite')
         sweepIntervalMs: 60000
         sweepOnStart: true

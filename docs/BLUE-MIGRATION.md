@@ -1,7 +1,7 @@
 # Blue single-package migration
 
 TokenLedger now ships its Web, command, HTTP, and Blue surfaces in the single
-`dsh-tokenledger` npm package. The Blue integration targets the Blue
+`dsh-tokenledger-pro` npm package. The Blue integration targets the Blue
 `0.1.2-alpha.1` release head `72aaca583306e42a4acac7525fe43b3f9ea0610e`
 and Harness
 `0.1.2-alpha.2`.
@@ -46,11 +46,11 @@ and wallet configuration stay on the existing Web/text-command surfaces.
 ## Distribution
 
 `package.json.blue.manifest` points to `./blue.plugin.json`. The manifest id is
-`dsh-tokenledger` and its selected public entry is the root export `.`. The
+`dsh-tokenledger-pro` and its selected public entry is the root export `.`. The
 bundle patch still contains exactly one bare-package row, so the Harness Web
 client scanner and Blue both load the same plugin instance.
 
-Install and enable only `dsh-tokenledger`; no companion package or second
+Install and enable only `dsh-tokenledger-pro`; no companion package or second
 composition row is required.
 
 ## Pull request verification

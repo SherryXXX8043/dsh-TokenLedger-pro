@@ -22,7 +22,7 @@ test("the settings schema exposes Chinese labels without changing resolved defau
 		relays: {},
 		officialOrigins: [],
 		fingerprint: false,
-		database: "tokenledger.sqlite",
+		database: "tokenledger-pro.sqlite",
 		sweepIntervalMs: 60_000,
 		sweepOnStart: true
 	});

@@ -43,7 +43,7 @@ async function loadBundle(options = {}) {
 	globalThis.window = {
 		__ModuleLoader__: {
 			load: ({ id, factory }) => {
-				assert.equal(id, "dsh-tokenledger", "the id must match the package name");
+				assert.equal(id, "dsh-tokenledger-pro", "the id must match the package name");
 				materialized = factory((name) => {
 					if (name === "react") return reactStub;
 					if (name === "react/jsx-runtime") return jsxRuntime;
@@ -143,7 +143,7 @@ test("styles are injected once, tagged so a re-execution can find them", async (
 	assert.equal(dom.head.children.length, 1, "a second execution appended a duplicate stylesheet");
 
 	const tag = dom.head.children[0];
-	assert.equal(tag.dataset.plugin, "dsh-tokenledger");
+	assert.equal(tag.dataset.plugin, "dsh-tokenledger-pro");
 	assert.ok(tag.textContent.includes(".tkl_panel"));
 	// Every colour must come from a DSH token or a scoped --tkl-* value, or the
 	// panel will not follow the user's theme.

@@ -63,7 +63,7 @@ await scenario("package.public-entry", async () => {
 		import("@dsh-blue/blue-api"),
 		import("@dsh-blue/blue-core"),
 		import("@dsh-blue/blue-core/theme-dark"),
-		import("dsh-tokenledger")
+		import("dsh-tokenledger-pro")
 	]);
 	ensure(plugin.name === "tokenledger", "FIXTURE_PLUGIN_NAME", "root package has the wrong Cordis name");
 	ensure(typeof plugin.apply === "function", "FIXTURE_PLUGIN_APPLY", "root package has no callable apply");

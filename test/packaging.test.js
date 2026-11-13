@@ -15,6 +15,20 @@ import { createRequire } from "node:module";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const patch = readFileSync(new URL("../cordis.patch.yml", import.meta.url), "utf8");
 
+test("Pro package and lockfile agree on the independent release identity", () => {
+	const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
+	assert.equal(pkg.name, "dsh-tokenledger-pro");
+	assert.equal(lock.name, pkg.name);
+	assert.equal(lock.version, pkg.version);
+	assert.equal(lock.packages[""].name, pkg.name);
+	assert.equal(lock.packages[""].version, pkg.version);
+	assert.equal(pkg.repository.url, "https://github.com/SherryXXX8043/dsh-TokenLedger-pro.git");
+	assert.match(patch, /id:\s+tokenledger-pro\b/u);
+	for (const path of ["LICENSE", "NOTICE", "CHANGELOG.md", "docs/PRO-MIGRATION.md"]) {
+		assert.ok(pkg.files.includes(path), `${path} must ship with the Pro package`);
+	}
+});
+
 /** The `name:` of every inserted loader entry. */
 const entryNames = [...patch.matchAll(/^\s*name:\s*'?([^'\s#]+)'?\s*$/gm)].map((m) => m[1]);
 

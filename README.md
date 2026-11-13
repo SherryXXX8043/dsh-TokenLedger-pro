@@ -1,9 +1,24 @@
-# TokenLedger
+# DSH TokenLedger Pro
 
 [![License](https://img.shields.io/badge/license-MIT-2da44e)](LICENSE)
 [![DSH](https://img.shields.io/badge/dsh-%3E%3D0.1.0--rc.6-1f6feb)](https://github.com/deepseek-ai/deepseek-harness)
 
-把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Token 用量算清楚，并归属到**实际服务这次请求的中转站**——不用配置，不用凭据。
+基于 [zh667/TokenLedger](https://github.com/zh667/TokenLedger) 的独立二次开发项目，由 [SherryXXX8043](https://github.com/SherryXXX8043) 维护，计划在原有用量统计、余额查询和订阅配额功能基础上，增加新功能与供应商适配，并改进 DSH 兼容性和使用体验。
+
+- **本项目仓库**：[SherryXXX8043/dsh-TokenLedger-pro](https://github.com/SherryXXX8043/dsh-TokenLedger-pro)
+- **原始项目**：[zh667/TokenLedger](https://github.com/zh667/TokenLedger)，感谢原作者及所有贡献者。
+- **开发基线**：上游提交 [`438d3086249d427e7185a69c5453cb1553c84f0b`](https://github.com/zh667/TokenLedger/commit/438d3086249d427e7185a69c5453cb1553c84f0b)。
+- **当前状态**：开发预发布版本 `0.1.0-pro.0`，已调整项目归属、独立包标识与默认索引路径，并修复 Windows 打包测试调用；尚无本分支新增的业务功能或供应商适配。下文功能说明和截图主要继承自上游，本分支的 DSH / Blue 实际界面兼容性仍需单独验收。
+- **维护方式**：本项目独立维护和发布；功能建议与问题反馈请提交至[本仓库 Issues](https://github.com/SherryXXX8043/dsh-TokenLedger-pro/issues)。后续按需选择性同步上游更新。
+- **开源许可**：继续采用 MIT，保留上游版权、许可文本及第三方声明，详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
+
+项目显示名称为 **DSH TokenLedger Pro**，包名为 `dsh-tokenledger-pro`，加载行标识为 `tokenledger-pro`，默认索引为 `tokenledger-pro.sqlite`。命令 `/tokenledger`、配置命名空间 `tokenledger`、Host 服务 `ctx.tokenLedger` 和 HTTP 路径暂时保持兼容，因此同一 profile 内只启用原版或 Pro 版之一。安装、备份和回退步骤见 [迁移说明](docs/PRO-MIGRATION.md)。
+
+## 基础能力 / Inherited capabilities
+
+以下内容基于上游 TokenLedger 的功能说明。
+
+把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Token 用量算清楚，并归属到**实际服务这次请求的中转站**——通常无需额外配置即可查看用量；余额查询需要相应凭据。
 
 Token-usage accounting for DeepSeek Harness, attributed to the relay site that
 served each request. The existing Web GUI (`dsh web`) and renderer-neutral
@@ -25,14 +40,14 @@ consumers share the same host-owned aggregation. Zero configuration.
 | 📊 | **用量分析** | 今日/本月/累计三窗口、按站点/模型下钻、缓存命中率、一年活跃度热力图（悬停看当天模型构成） |
 | 🧮 | **费用估算** | 生效日期分段的费率表、分桶计价、峰谷时段；未定价的模型显示破折号而不是 0 |
 | 🗂 | **导出与诊断** | CSV / JSON 导出，索引健康度，归因不上的行数单独列出 |
-| 🔒 | **只读回环** | 两个端点仅接受回环 GET，且在 peer socket 地址上设防；从不读取提示词、工具参数或响应内容 |
+| 🔒 | **回环访问** | 用量与余额通过 GET 查询；用户中心凭据通过专用 POST 保存。接口校验 peer socket 与 Host，不向查询响应返回密钥 |
 
 ## 快速安装 / Quick start
 
 需要 DeepSeek Harness `web` profile（`@deepseek-ai/dsh >= 0.1.0-rc.6`）。
 
 ```bash
-dsh plugin --profile web add "github:zh667/TokenLedger"
+dsh plugin --profile web add "github:SherryXXX8043/dsh-TokenLedger-pro"
 ```
 
 重启已经在跑的 `dsh web`，浏览器硬刷新。侧边栏底部会出现「用量账本」入口。
@@ -40,20 +55,19 @@ dsh plugin --profile web add "github:zh667/TokenLedger"
 升级或卸载：
 
 ```bash
-dsh plugin --profile web update dsh-tokenledger
-dsh plugin --profile web remove dsh-tokenledger
+dsh plugin --profile web update dsh-tokenledger-pro
+dsh plugin --profile web remove dsh-tokenledger-pro
 ```
 
-重装同一个 spec 会重新解析，所以 `add` 一遍就能拿到最新的 `main`（实测过，不是推测）。
+重装同一个 spec 可重新解析来源；固定版本时应使用本仓库对应 Pro 版本的完整 40 位提交 SHA。
 
-**要钉某个版本，必须用完整的 40 位 commit SHA。** 包管理器把 ref 拿去和 `git ls-remote` 广播的引用列表比对，而那份列表里只有完整 SHA 和分支/标签名——**短 SHA 匹配不到任何东西，会直接报 `Could not resolve`**：
-
-| spec | |
+| spec | 说明 |
 | --- | --- |
-| `github:zh667/TokenLedger` | ✅ |
-| `github:zh667/TokenLedger#main` | ✅ |
-| `github:zh667/TokenLedger#947247a` | ❌ 短 SHA 解析不了 |
-| `github:zh667/TokenLedger#947247a86f0835f0e746695538569b1a76356dd1` | ✅ |
+| `github:SherryXXX8043/dsh-TokenLedger-pro` | 跟随默认分支 |
+| `github:SherryXXX8043/dsh-TokenLedger-pro#main` | 跟随 main 分支 |
+| `github:SherryXXX8043/dsh-TokenLedger-pro#<完整40位提交SHA>` | 将占位符替换为实际 Pro 提交；不要使用短 SHA |
+
+上游基线提交保留原包名，仅用于追溯来源。当前 Pro 改动在提交并推送之前，远程安装仍会得到之前的源码。
 
 如果 `package.json` 里已经被写进了一个解析不了的 spec，`add` 也会失败——它会先解析整份清单。改掉那一行再 `install` 即可。
 
@@ -214,25 +228,27 @@ DSH 的工作区（`ctx.workspace`）是**一个目录的登记**——`create(p
 ## 隐私与安全 / Privacy & security
 
 - **从不读取内容。** 只有计数和标识符：token 数、模型名、provider 路由名、站点域名。提示词、工具参数、响应正文既不读也不存。
-- **凭据只在宿主侧。** key 由宿主的 credentials 服务按引用（`apiKeyEnv`）在请求时解析、用完即弃，始终走 `Authorization` 头，绝不进 URL 查询串。浏览器永远拿不到 key。
-- **回环防护。** 两个 HTTP 端点注册为 exact 路由，因此位于 RPC 信任边界**之外**，处理器自己设防：拒绝非 GET，并同时校验 **peer socket 地址**（不可伪造）与 Host 头。
+- **凭据处理。** provider 的 API key 在宿主侧通过 credentials 服务解析，用于余额请求，不进入用量数据库或查询响应。New API 用户中心的“设置余额”功能会接收并保存用户 ID 与访问令牌到插件设置；查询仅返回是否已设置令牌，不回传令牌本身。
+- **回环防护。** HTTP 端点注册为 exact 路由，因此位于 RPC 信任边界**之外**，处理器同时校验 **peer socket 地址**与 Host 头。查询使用 GET，只有 `/api/tokenledger/userauth` 接受 POST 保存或清除用户中心凭据。
 - **中转站指纹识别不用凭据**，靠路由的 404/401 特征。
 
 ## API
 
-浏览器面板读这两个端点，仅限回环 GET：
+浏览器面板使用以下端点，均限制回环访问：
 
 | 端点 | 说明 |
 | --- | --- |
 | `GET /api/tokenledger/usage?days=&site=` | 整个面板的数据：三窗口合计、按天/模型/站点、一年活跃度与逐日模型构成、账户列表、索引诊断 |
 | `GET /api/tokenledger/balance?account=` | 某个账户的余额 |
+| `GET /api/tokenledger/userauth?origin=` | 用户中心凭据的设置状态，仅含用户 ID 与令牌是否存在 |
+| `POST /api/tokenledger/userauth` | 保存或清除用户中心凭据；这是写入插件设置的接口 |
 
 包也可作为库使用，供 DSH 之外的消费者：
 
 ```js
-import { foldUsage, bySite, byModel } from "dsh-tokenledger";
-import { LedgerStore } from "dsh-tokenledger/store";
-import { readBalance } from "dsh-tokenledger/balance";
+import { foldUsage, bySite, byModel } from "dsh-tokenledger-pro";
+import { LedgerStore } from "dsh-tokenledger-pro/store";
+import { readBalance } from "dsh-tokenledger-pro/balance";
 ```
 
 ### Harness 与 Blue
@@ -240,7 +256,7 @@ import { readBalance } from "dsh-tokenledger/balance";
 `ctx.tokenLedger` 为现有消费者保留原有对象身份和九个成员：`store`、`sweep`、
 `totals`、`byDay`、`byModel`、`bySite`、`sites`、`diagnostics` 和 `reindex`。
 
-Blue UI 与 Web UI 都包含在同一个 `dsh-tokenledger` npm 包中。安装该 bundle 后：
+Blue UI 与 Web UI 都包含在同一个 `dsh-tokenledger-pro` npm 包中。安装该 bundle 后：
 
 - 普通 Harness/Web 环境保留原文本 `/tokenledger` 命令和回环 HTTP 面板。
 - 检测到 Blue host 时，同一个插件 Fiber 挂载原生 dashboard，并以 Blue overlay
@@ -254,8 +270,9 @@ Blue UI 与 Web UI 都包含在同一个 `dsh-tokenledger` npm 包中。安装�
 ## 开发 / Development
 
 ```bash
+npm ci --ignore-scripts
 npm test          # 含浏览器半边——它能在 Node 里被物化和测试
-npm pack --dry-run
+npm pack --dry-run --json
 ```
 
 浏览器半边**没有构建步骤**：它是一个手写的 `__ModuleLoader__` bundle，React 由宿主作为 peer 提供，样式手写注入。因此它能在 Node 里被加载和测试。
@@ -307,8 +324,8 @@ blue
 
 </details>
 
-> ⚠️ **非官方声明**：TokenLedger 是独立的第三方社区项目，与 DeepSeek 无隶属、赞助或背书关系。以上友链亦不代表任何隶属、赞助或背书关系。「DeepSeek」及相关商标归其权利人所有。
+> **非官方声明**：DSH TokenLedger Pro 是基于 TokenLedger 的独立第三方二次开发项目，不代表上游作者的维护、赞助或背书，与 DeepSeek 无隶属、赞助或背书关系。原作者与第三方项目的版权和致谢予以保留。以上友链亦不代表任何隶属、赞助或背书关系。「DeepSeek」及相关商标归其权利人所有。
 
 ## License
 
-[MIT](LICENSE)
+本项目继续采用 [MIT License](LICENSE)。上游 TokenLedger 的版权声明与 MIT 许可文本保持保留，本分支的修改由 SherryXXX8043 和 DSH TokenLedger Pro 贡献者按同一许可证提供。第三方来源与归属见 [NOTICE](NOTICE)。

@@ -5,7 +5,7 @@ accounting direction as durable Harness session logs -> TokenLedger store ->
 `usagePayload()` -> bounded renderer views. The Web client and the in-package
 Blue adapter consume that domain truth rather than folding session events.
 
-Blue is an optional renderer inside the single `dsh-tokenledger` npm package.
+Blue is an optional renderer inside the single `dsh-tokenledger-pro` npm package.
 The root Cordis `apply()` owns one internal dashboard controller and passes it
 directly to the Blue adapter in the same Fiber. Do not publish that controller
 on `ctx`, add a second Cordis plugin row, create another npm package, or restore

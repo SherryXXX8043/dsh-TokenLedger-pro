@@ -108,7 +108,7 @@ export const inject = ["sessionPersistence"];
 
 /** Defaults chosen so an unconfigured mount still does something useful. */
 const DEFAULTS = {
-	database: "tokenledger.sqlite",
+	database: "tokenledger-pro.sqlite",
 	sweepIntervalMs: 60_000,
 	sweepOnStart: true,
 	commandEnabled: true

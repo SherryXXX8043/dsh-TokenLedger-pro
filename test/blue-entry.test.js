@@ -8,7 +8,7 @@ import { Context, Service } from "@deepseek-ai/cordis";
 import { mountTokenLedgerBlue } from "../src/blue/index.js";
 import { tokenLedgerAccountTabId } from "../src/blue/model.js";
 
-const BLUE_NAME = "dsh-tokenledger";
+const BLUE_NAME = "dsh-tokenledger-pro";
 
 function usage(tokens = 100, overrides = {}) {
 	return {

@@ -123,7 +123,7 @@ export function buildSchema(z) {
 			.description("探测中转软件")
 			.comment("向中转站发起匿名探测以识别软件类型"),
 		/** Rollup database path. */
-		database: z.string().default("tokenledger.sqlite")
+		database: z.string().default("tokenledger-pro.sqlite")
 			.description("数据库路径")
 			.comment("TokenLedger 汇总数据库文件"),
 		/** Milliseconds between background sweeps; 0 disables the timer. */

@@ -65,7 +65,7 @@
  * shaped around: with no toolchain, the browser half can be materialized and
  * tested in Node, which is what `test/client.test.js` does.
  *
- * @module dsh-tokenledger/client
+ * @module dsh-tokenledger-pro/client
  */
 
 // Stage zero. If this line never prints, the bundle was never fetched or never
@@ -76,7 +76,7 @@
 console.info("[tokenledger] bundle script executing (client half present)");
 
 window.__ModuleLoader__.load({
-	id: "dsh-tokenledger",
+	id: "dsh-tokenledger-pro",
 	factory: (require) => {
 		console.info("[tokenledger] factory materializing");
 		var module = { exports: {} };
@@ -395,10 +395,10 @@ window.__ModuleLoader__.load({
 			"@media (prefers-reduced-motion:reduce){.tkl_skel{animation:none}}"
 		].join("");
 
-		const STYLE_ID = "dsh-tokenledger/panel.css";
+		const STYLE_ID = "dsh-tokenledger-pro/panel.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(STYLE_ID) + "]") === null) {
 			const tag = document.createElement("style");
-			tag.dataset.plugin = "dsh-tokenledger";
+			tag.dataset.plugin = "dsh-tokenledger-pro";
 			tag.dataset.pluginCss = STYLE_ID;
 			tag.textContent = css;
 			document.head.appendChild(tag);
