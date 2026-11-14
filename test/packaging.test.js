@@ -29,6 +29,18 @@ test("Pro package and lockfile agree on the independent release identity", () =>
 	}
 });
 
+test("Desktop plugin metadata and icon exports are available as package resources", () => {
+	const require = createRequire(import.meta.url);
+	for (const language of ["zh", "en"]) {
+		const locale = JSON.parse(readFileSync(require.resolve(`${pkg.name}/locale/${language}.json`), "utf8"));
+		assert.ok(locale.meta.title);
+		assert.ok(locale.meta.description);
+	}
+	const icon = readFileSync(require.resolve(`${pkg.name}/icon`), "utf8");
+	assert.match(icon, /<svg\b/u);
+	assert.equal(/<script|foreignObject|onload=/iu.test(icon), false);
+});
+
 /** The `name:` of every inserted loader entry. */
 const entryNames = [...patch.matchAll(/^\s*name:\s*'?([^'\s#]+)'?\s*$/gm)].map((m) => m[1]);
 
@@ -126,8 +138,8 @@ test("no official @deepseek-ai package is a hard dependency", () => {
 		assert.equal(name.startsWith("@deepseek-ai/"), false, `${name} must be a peer, not a dependency`);
 	}
 	for (const name of Object.keys(pkg.peerDependencies ?? {})) {
-		if (name === "@deepseek-ai/cordis") {
-			assert.equal(pkg.peerDependenciesMeta?.[name], undefined, "Cordis is the required host-owned Blue lifecycle peer");
+		if (name === "@deepseek-ai/cordis" || name === "@deepseek-ai/schemastery") {
+			assert.equal(pkg.peerDependenciesMeta?.[name]?.optional, undefined, "lifecycle and Config schema peers must be supplied by the host");
 			continue;
 		}
 		assert.equal(
@@ -191,7 +203,7 @@ test("the package root stays a promise, not an inventory", () => {
 	// was a breaking change — which is what had blocked cleaning the modules up.
 	// Anything not listed here is still reachable through its own subpath, where
 	// the import itself says you are reaching for an internal.
-	const promised = ["apply", "inject", "name", "foldUsage", "bySite", "byModel"].sort();
+	const promised = ["Config", "apply", "inject", "name", "foldUsage", "bySite", "byModel"].sort();
 	const actual = Object.keys(root).sort();
 	assert.deepEqual(actual, promised, "widening the root is a decision, so it has to be made here first");
 });
@@ -199,7 +211,7 @@ test("the package root stays a promise, not an inventory", () => {
 test("every subpath in exports actually resolves", async () => {
 	// Narrowing the root is only safe because the subpaths carry the rest.
 	for (const [subpath, target] of Object.entries(pkg.exports)) {
-		if (subpath === "./package.json" || subpath === "./client") continue; // client needs a browser
+		if (subpath === "./package.json" || subpath === "./client" || subpath === "./icon" || subpath.startsWith("./locale/")) continue; // resources are verified separately
 		const module = await import(new URL(`../${target.replace(/^\.\//, "")}`, import.meta.url));
 		assert.ok(Object.keys(module).length > 0, `${subpath} resolves but exports nothing`);
 	}

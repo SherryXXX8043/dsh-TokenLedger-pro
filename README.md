@@ -1,14 +1,14 @@
 # DSH TokenLedger Pro
 
 [![License](https://img.shields.io/badge/license-MIT-2da44e)](LICENSE)
-[![DSH](https://img.shields.io/badge/dsh-%3E%3D0.1.0--rc.6-1f6feb)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/dsh-%3E%3D0.2.2--rc.3-1f6feb)](https://github.com/deepseek-ai/deepseek-harness)
 
 基于 [zh667/TokenLedger](https://github.com/zh667/TokenLedger) 的独立二次开发项目，由 [SherryXXX8043](https://github.com/SherryXXX8043) 维护，计划在原有用量统计、余额查询和订阅配额功能基础上，增加新功能与供应商适配，并改进 DSH 兼容性和使用体验。
 
 - **本项目仓库**：[SherryXXX8043/dsh-TokenLedger-pro](https://github.com/SherryXXX8043/dsh-TokenLedger-pro)
 - **原始项目**：[zh667/TokenLedger](https://github.com/zh667/TokenLedger)，感谢原作者及所有贡献者。
 - **开发基线**：上游提交 [`438d3086249d427e7185a69c5453cb1553c84f0b`](https://github.com/zh667/TokenLedger/commit/438d3086249d427e7185a69c5453cb1553c84f0b)。
-- **当前状态**：开发预发布版本 `0.1.0-pro.0`，已调整项目归属、独立包标识与默认索引路径，并修复 Windows 打包测试调用；尚无本分支新增的业务功能或供应商适配。下文功能说明和截图主要继承自上游，本分支的 DSH / Blue 实际界面兼容性仍需单独验收。
+- **当前状态**：开发预发布版本 `0.1.0-pro.0`。`feat/desktop-support` 实现 Desktop / Web 共用入口、连接通道、当前 Config 设置页和默认账户，并修复新日志格式的 fork / 重试统计。Windows DSH `0.2.2-rc.3` 的实际截图已确认主页面、中转站归属、DeepSeek 余额、New API 已用额度及设置加载；583 项自动测试通过。默认账户的真实保存、最新弹窗样式、明暗主题切换与独立 Web 部署仍待验收，详见 [Desktop 验证记录](docs/DESKTOP-SUPPORT.md)。
 - **维护方式**：本项目独立维护和发布；功能建议与问题反馈请提交至[本仓库 Issues](https://github.com/SherryXXX8043/dsh-TokenLedger-pro/issues)。后续按需选择性同步上游更新。
 - **开源许可**：继续采用 MIT，保留上游版权、许可文本及第三方声明，详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
@@ -40,17 +40,21 @@ consumers share the same host-owned aggregation. Zero configuration.
 | 📊 | **用量分析** | 今日/本月/累计三窗口、按站点/模型下钻、缓存命中率、一年活跃度热力图（悬停看当天模型构成） |
 | 🧮 | **费用估算** | 生效日期分段的费率表、分桶计价、峰谷时段；未定价的模型显示破折号而不是 0 |
 | 🗂 | **导出与诊断** | CSV / JSON 导出，索引健康度，归因不上的行数单独列出 |
-| 🔒 | **回环访问** | 用量与余额通过 GET 查询；用户中心凭据通过专用 POST 保存。接口校验 peer socket 与 Host，不向查询响应返回密钥 |
+| 🔒 | **宿主认证** | 当前 Desktop / Web 共用认证连接通道，查询不返回密钥；旧 HTTP 回退仍限制回环访问 |
 
 ## 快速安装 / Quick start
 
-需要 DeepSeek Harness `web` profile（`@deepseek-ai/dsh >= 0.1.0-rc.6`）。
+本分支当前以 DSH `0.2.2-rc.3` 为最低验证基线，支持 Desktop 与 Web 的共同插件机制；`dsh.client.platform: web` 表示共享浏览器界面，不排除 Desktop。
+
+本地开发：在 Desktop 的插件管理中添加本仓库目录。开发版安装后左侧导航或“更多”中会出现「用量账本 Pro」，点击打开主内容区。不要同时启用原版。替换已安装源码时，按插件管理器返回的提示重载或重启；本项目不保证没有构建 watcher 时自动热更新。
+
+以下 GitHub 安装示例针对对应改动已经推送的分支。`web` 可替换为实际 profile（例如 `desktop`）：
 
 ```bash
-dsh plugin --profile web add "github:SherryXXX8043/dsh-TokenLedger-pro"
+dsh plugin --profile web add "github:SherryXXX8043/dsh-TokenLedger-pro#feat/desktop-support"
 ```
 
-重启已经在跑的 `dsh web`，浏览器硬刷新。侧边栏底部会出现「用量账本」入口。
+当前 Desktop 适配在 `feat/desktop-support` 分支独立维护，尚未合并到 `main`。从默认分支安装仍会得到之前的准备版本；测试本期功能请显式选择上述开发分支。
 
 升级或卸载：
 
@@ -124,46 +128,47 @@ Sub2API 的 `/v1/usage` 有三种形态，面板都认：key 配了总额度或�
 
 ## 配置 / Configuration
 
-**通常不需要任何配置。** 中转站从宿主的 provider 设置里读出来。
+当前 DSH 从 provider 的有效 Config 自动发现站点。旧版 `settings.yaml` 注册接口已移除，本分支使用插件 Config 和宿主 Settings 服务。
 
-需要覆盖时，写进你已有的 `settings.yaml`（改完热更新，不用重启）：
+在账本页面顶部点击“设置”，或进入“插件 → 用量账本 Pro”的配置区。可编辑路由覆盖、模型费率、自定义余额端点三个 JSON 字段，保存带版本检查并实时生效。详细说明见 [账本设置](docs/SETTINGS.md)。
 
-```yaml
-tokenledger:
-  # 只在自动发现看不到时才需要——比如组合里没挂 settings 服务，
-  # 或 provider 是 agent preset 在 agent.cordis.yml 里挂的
-  relays:
-    my-route: https://relay.example.com/v1
+例如“路由覆盖”填写：
 
-  # 费率表，用于费用估算；不配就显示破折号，不会猜
-  rates: []
-
-  # 探测中转站跑的是哪套程序。默认关闭，第一次查余额时会自动探一次
-  fingerprint: false
+```json
+{
+  "my-route": "https://relay.example.com/v1"
+}
 ```
+
+模型费率使用数组；`null` 恢复默认费率行为。余额令牌通过余额卡片的“设置查询API”单独保存，不应填入这些 JSON 字段。
 
 ### 自己声明一个余额接口 / Declared endpoints
 
 内置表覆盖不到的供应商，可以自己声明它的接口，不用等我们发版本：
 
-```yaml
-tokenledger:
-  endpoints:
-    - origin: https://relay.example.com   # 必须是你已配置的某条 provider 的同源地址
-      displayName: 我的中转站
-      path: /api/quota
-      # raw: true    # 有些控制台接口要裸密钥，不要 Bearer 前缀
-      fields:        # 值是响应 JSON 里的取值路径，不是表达式
-        total: data.balance
-        granted: data.total
-        used: data.used
-        currency: data.unit
-        plan: data.plan_name
-      windows:
-        - kind: weekly          # session / daily / weekly / monthly / billing
-          usedPercent: data.week.percent
-          resetsAt: data.week.reset_at
+在“自定义余额端点”字段中填写数组，例如：
+
+```json
+[
+  {
+    "origin": "https://relay.example.com",
+    "displayName": "我的中转站",
+    "path": "/api/quota",
+    "fields": {
+      "total": "data.balance",
+      "granted": "data.total",
+      "used": "data.used",
+      "currency": "data.unit",
+      "plan": "data.plan_name"
+    },
+    "windows": [
+      { "kind": "weekly", "usedPercent": "data.week.percent", "resetsAt": "data.week.reset_at" }
+    ]
+  }
+]
 ```
+
+`origin` 必须与已配置的 provider 同源。有些接口需要裸令牌认证时可增加 `"raw": true`；此字段只选择认证形式，不接收密钥。
 
 `fields` 和 `windows` 里写的是**取值路径**——描述"数字在哪儿"，不描述"怎么取"。没有表达式，也没有任何东西会被求值。路径写错只会让那个字段缺席，其余照常显示。
 
@@ -228,20 +233,22 @@ DSH 的工作区（`ctx.workspace`）是**一个目录的登记**——`create(p
 ## 隐私与安全 / Privacy & security
 
 - **从不读取内容。** 只有计数和标识符：token 数、模型名、provider 路由名、站点域名。提示词、工具参数、响应正文既不读也不存。
-- **凭据处理。** provider 的 API key 在宿主侧通过 credentials 服务解析，用于余额请求，不进入用量数据库或查询响应。New API 用户中心的“设置余额”功能会接收并保存用户 ID 与访问令牌到插件设置；查询仅返回是否已设置令牌，不回传令牌本身。
-- **回环防护。** HTTP 端点注册为 exact 路由，因此位于 RPC 信任边界**之外**，处理器同时校验 **peer socket 地址**与 Host 头。查询使用 GET，只有 `/api/tokenledger/userauth` 接受 POST 保存或清除用户中心凭据。
+- **凭据处理。** provider 的 API key 在宿主侧通过 credentials 服务解析，用于余额请求，不进入用量数据库或查询响应。New API 的“设置查询API”将新凭据保存到宿主 credentials record，不再写入普通插件配置；页面只得到用户 ID 与令牌是否存在。旧版 `userAuth` 仅作只读兼容，删除前需清理仍存在的旧来源。
+- **访问边界。** 当前 Desktop 和 Web 将接口注册到宿主 `connection.fetch`，由宿主的认证和 owner Peer 检查后分发；Desktop 使用 IPC carrier，不假设 HTTP 端口。旧宿主的 exact HTTP 回退仍校验回环 peer 与 Host，并在有宿主认证服务时执行认证。查询使用 GET，只有 `/api/tokenledger/userauth` 接受 POST 保存或清除用户中心凭据。
 - **中转站指纹识别不用凭据**，靠路由的 404/401 特征。
 
 ## API
 
-浏览器面板使用以下端点，均限制回环访问：
+Desktop / Web 通过宿主认证通道使用以下逻辑端点；旧 HTTP 回退限制回环访问：
 
 | 端点 | 说明 |
 | --- | --- |
 | `GET /api/tokenledger/usage?days=&site=` | 整个面板的数据：三窗口合计、按天/模型/站点、一年活跃度与逐日模型构成、账户列表、索引诊断 |
 | `GET /api/tokenledger/balance?account=` | 某个账户的余额 |
 | `GET /api/tokenledger/userauth?origin=` | 用户中心凭据的设置状态，仅含用户 ID 与令牌是否存在 |
-| `POST /api/tokenledger/userauth` | 保存或清除用户中心凭据；这是写入插件设置的接口 |
+| `POST /api/tokenledger/userauth` | 保存或清除宿主凭据库中的钱包查询记录 |
+| `GET /api/tokenledger/settings` | 读取非敏感配置和 revision |
+| `POST /api/tokenledger/settings` | 保存路由、费率、端点设置；过期 revision 返回 409 |
 
 包也可作为库使用，供 DSH 之外的消费者：
 

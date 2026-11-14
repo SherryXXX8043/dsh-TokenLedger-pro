@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "用量账本 Pro",
+    "description": "DSH Desktop 与 Web 的 Token 用量账本，按项目、站点和模型查看用量，并查询支持账户的余额与订阅配额。基于 TokenLedger 独立开发；同一 profile 中请只启用原版或 Pro 版之一。"
+  }
+}

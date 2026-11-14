@@ -10,6 +10,9 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { apply } from "../src/plugin.js";
 import { LedgerStore } from "../src/store.js";
@@ -113,6 +116,24 @@ const piAi = (route) => ({
 	settingsPath: ["providers", route]
 });
 
+test("official balance does not read New API wallet records", async () => {
+	const routes = new Map();
+	let recordReads = 0;
+	const f = fakeContext({ providers: [piAi("official")], section: { providers: { official: { baseURL: "https://api.deepseek.com", apiKeyEnv: "FIXTURE_REF" } } }, services: {
+		credentials: { resolve: async () => ({ value: "fixture-only" }), readRecord: async () => { recordReads++; throw new Error("record provider failed"); } },
+		connection: { fetch: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path); } } }
+	} });
+	const previousFetch = globalThis.fetch;
+	globalThis.fetch = async () => new Response(JSON.stringify({ is_available: true, balance_infos: [{ currency: "CNY", total_balance: "12.50" }] }));
+	try {
+		apply(f.ctx, { database: ":memory:", sweepOnStart: false, sweepIntervalMs: 0 });
+		const route = routes.get("/api/tokenledger/balance");
+		const response = await route.fetch(new Request("http://fixture.test/api/tokenledger/balance?account=official"));
+		assert.equal((await response.json()).total, 12.5);
+		assert.equal(recordReads, 0);
+	} finally { globalThis.fetch = previousFetch; await f.dispose(); }
+});
+
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** Capture every reflected service by its stable Cordis name. */
@@ -130,6 +151,69 @@ async function waitFor(predicate, turns = 100) {
 	}
 	return false;
 }
+
+test("a restarted apply refolds unchanged-looking persisted revisions before trusting them", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "tokenledger-revision-restart-"));
+	const database = join(directory, "ledger.sqlite");
+	try {
+		for (const inputTokens of [100, 200]) {
+			const { ctx, dispose } = fakeContext();
+			ctx.get = () => undefined;
+			const services = captureServices(ctx);
+			let reads = 0;
+			const event = turn(0, "fixture");
+			event.data.usage = { inputTokens, outputTokens: 0 };
+			ctx.sessionPersistence = {
+				identity: Symbol("persistence"),
+				list: async () => [{ header: { id: "s1", isSeeded: false }, revision: "same-revision" }],
+				open: async () => ({ inheritedEventCount: 0, read: async () => {
+					reads++;
+					return { events: [event], eventState: "detached" };
+				}, close: async () => {} })
+			};
+			apply(ctx, { database, sweepIntervalMs: 0, sweepOnStart: false });
+			try {
+				const api = services.get("tokenLedger");
+				assert.equal((await api.sweep()).updated, 1);
+				assert.equal(api.totals().inputTokens, inputTokens);
+				assert.equal((await api.sweep()).skipped, 1);
+				assert.equal(reads, 1);
+			} finally { await dispose(); }
+		}
+	} finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("revision trust survives service proxies but resets for a replacement persistence identity", async () => {
+	const { ctx, dispose } = fakeContext();
+	ctx.get = () => undefined;
+	const services = captureServices(ctx);
+	let reads = 0;
+	const persistence = (identity, inputTokens) => ({
+		identity,
+		list: async () => [{ header: { id: "s1", isSeeded: false }, revision: "same-revision" }],
+		open: async () => ({ inheritedEventCount: 0, read: async () => {
+			reads++;
+			const event = turn(0, "fixture");
+			event.data.usage = { inputTokens, outputTokens: 0 };
+			return { events: [event], eventState: "detached" };
+		}, close: async () => {} })
+	});
+	const firstIdentity = Symbol("first");
+	ctx.sessionPersistence = persistence(firstIdentity, 100);
+	apply(ctx, { database: ":memory:", sweepIntervalMs: 0, sweepOnStart: false });
+	try {
+		const api = services.get("tokenLedger");
+		await api.sweep();
+		ctx.sessionPersistence = persistence(firstIdentity, 100); // another proxy onto the same backend
+		assert.equal((await api.sweep()).skipped, 1);
+		assert.equal(reads, 1);
+		ctx.sessionPersistence = persistence(Symbol("replacement"), 200);
+		assert.equal((await api.sweep()).updated, 1);
+		assert.equal(api.totals().inputTokens, 200);
+		assert.equal(reads, 2);
+		assert.equal((await api.sweep()).skipped, 1);
+	} finally { await dispose(); }
+});
 
 test("a relay is discovered and its traffic attributed, with no configuration at all", async () => {
 	const { ctx } = fakeContext({

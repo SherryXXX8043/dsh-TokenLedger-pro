@@ -29,6 +29,8 @@
 
 import { apply as applyPlugin } from "./plugin.js";
 
+export { Config } from "./plugin.js";
+
 export const name = "tokenledger";
 export const inject = ["sessionPersistence"];
 

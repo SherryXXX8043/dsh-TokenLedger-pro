@@ -34,13 +34,17 @@
  * @module dsh-tokenledger/plugin
  */
 
+import { createWalletCredentials } from "./wallet-credentials.js";
+import { Config, configValue, createSettingsAccess } from "./settings-schema.js";
+export { Config };
+
 import { DIRECT, UNKNOWN, UNROUTED, applyUsageDelta, createUsageState, dayKey } from "./usage.js";
 import { RelaySiteRegistry, SITE_TYPES, createSiteResolver, domainOf, normalizeOrigin } from "./relay-sites.js";
 import { createFingerprintRegistry } from "./fingerprints.js";
 import { describeProject, readProjectTitles, workspaceRegistry } from "./projects.js";
 import { discoverFromContext, mergeSites, withKnownSoftware } from "./discovery.js";
 import { createBalanceReader, listAccounts } from "./balance.js";
-import { createNewApiWalletReader, shouldUseWallet } from "./newapi-user.js";
+import { createNewApiWalletReader, isWalletAccount, shouldUseWallet } from "./newapi-user.js";
 import { VERSION, priceToday, registerRoutes, usagePayload } from "./http.js";
 import { DashboardController, DashboardControllerError } from "./dashboard-controller.js";
 import { mountTokenLedgerBlue } from "./blue/index.js";
@@ -250,10 +254,13 @@ export async function sweep(persistence, store, options = {}) {
 
 			// An unchanged log needs no read at all. This is what keeps a sweep
 			// cheap enough to run on a timer.
-			if (checkpoint !== undefined && revision !== undefined && checkpoint.logRevision === revision) {
+			const revisionTrusted = options.trustedRevisionSessions === undefined || options.trustedRevisionSessions.has(sessionId);
+			if (revisionTrusted && checkpoint !== undefined && revision !== undefined && checkpoint.logRevision === revision) {
 				stats.skipped++;
 				continue;
 			}
+			// A failed refresh cannot leave the prior revision trusted.
+			options.trustedRevisionSessions?.delete(sessionId);
 
 			// The handle-based seam reads the log through `open(id, "read")`;
 			// `readFrom(id, seq)` is gone with it. The v1→v2 session migration
@@ -265,21 +272,42 @@ export async function sweep(persistence, store, options = {}) {
 			// rows wholesale, so the full fold cannot double count.
 			let events;
 			let state;
+			let replacingSession = false;
 			if (typeof persistence.open === "function") {
 				const handle = await persistence.open(sessionId, "read");
+				let inheritedEventCount;
+				let storedHeader;
 				try {
+					inheritedEventCount = handle.inheritedEventCount;
+					storedHeader = handle.header ?? snapshot.header;
 					({ events } = await handle.read(0));
 				} finally {
 					await handle.close();
 				}
-				// A fork's durable log starts with a copy of its parent's event
-				// prefix; DSH records the exclusive end of that inherited prefix
-				// as seedLength. A full re-read sees the prefix again, so the
-				// fold starts past it — counting it under the child's session id
-				// would inflate every fork's ledger.
-				const seedLength = snapshot.header?.seedLength ?? 0;
-				events = (events ?? []).filter((event) => (event.seq ?? 0) >= seedLength);
+				events ??= [];
 				state = createUsageState();
+				if (inheritedEventCount !== undefined) {
+					// Current DSH stores the inherited cut on the handle as a log
+					// OFFSET, not a header field or an event-seq predicate.
+					if (!Number.isSafeInteger(inheritedEventCount) || inheritedEventCount < 0 || inheritedEventCount > events.length) {
+						throw new Error("invalid inherited event count");
+					}
+					// Failed attempts have no message source. Retain only route
+					// metadata from the inherited prefix, never its usage samples.
+					applyUsageDelta(state, events.slice(0, inheritedEventCount).filter((event) =>
+						event.type === "request/header" || event.type === "request/context"), { resolveSite });
+					events = events.slice(inheritedEventCount);
+				} else {
+					// Historical handle implementations exposed seedLength. A
+					// seeded current log without its cut must fail rather than
+					// silently charge its parent's requests a second time.
+					if (storedHeader?.isSeeded === true && storedHeader.seedLength === undefined) {
+						throw new Error("seeded session is missing inherited event count");
+					}
+					const seedLength = storedHeader?.seedLength ?? 0;
+					events = events.filter((event) => (event.seq ?? 0) >= seedLength);
+				}
+				replacingSession = true;
 			} else {
 				// The pre-handle seam still reads a tail. A fork's durable log
 				// starts with a copy of its parent's event prefix. DSH records
@@ -288,13 +316,14 @@ export async function sweep(persistence, store, options = {}) {
 				// inflate the ledger. Existing checkpoints already point past the
 				// prefix; only a session's first read needs to start at the
 				// durable seed boundary.
-				state = store.loadState(sessionId);
-				const fromSeq = checkpoint === undefined
+				state = revisionTrusted ? store.loadState(sessionId) : createUsageState();
+				const fromSeq = checkpoint === undefined || !revisionTrusted
 					? (snapshot.header?.seedLength ?? 0)
 					: state.consumedSeq + 1;
 				({ events } = await persistence.readFrom(sessionId, fromSeq));
+				replacingSession = !revisionTrusted;
 			}
-			if ((events?.length ?? 0) === 0) {
+			if ((events?.length ?? 0) === 0 && !replacingSession) {
 				stats.skipped++;
 				continue;
 			}
@@ -308,6 +337,7 @@ export async function sweep(persistence, store, options = {}) {
 				// write the same value back.
 				project: snapshot.header?.cwd
 			});
+			options.trustedRevisionSessions?.add(sessionId);
 			stats.updated++;
 			stats.events += events.length;
 		} catch (error) {
@@ -649,7 +679,14 @@ function routeAttributionReport(store, directory) {
  * this one plugin Fiber.
  */
 export function apply(ctx, userConfig = {}) {
-	const config = { ...DEFAULTS, ...userConfig };
+	const config = { ...DEFAULTS, ...Object.fromEntries(Object.entries(userConfig).map(([key, value]) => [key, configValue(value)])) };
+	for (const key of ["relays", "rates", "endpoints", "defaultAccount"]) {
+		const ref = userConfig[key];
+		if (ref && typeof ref === "object" && Symbol.for("cosmokit.volatile.write") in ref) {
+			Object.defineProperty(config, key, { enumerable: true, configurable: true, get: () => ref.get() });
+		}
+	}
+	const settingsAccess = createSettingsAccess(ctx, config, { accounts: () => listAccounts(ctx) });
 	const logger = ctx.logger?.("tokenledger") ?? ctx.logger;
 
 	// First line the host half prints, and it carries the version. Three
@@ -737,6 +774,10 @@ export function apply(ctx, userConfig = {}) {
 	};
 
 	let running = false;
+	// Revision strings are comparable only within one persistence instance.
+	// Never trust the SQLite checkpoint alone after plugin/process restart.
+	const trustedRevisionSessions = new Set();
+	let persistenceIdentity;
 	// When the logs were last LOOKED AT, which is a different fact from when
 	// they last changed. The checkpoint table only advances on a session that
 	// moved, so a quiet hour leaves `MAX(updatedAt)` an hour behind while the
@@ -790,10 +831,19 @@ export function apply(ctx, userConfig = {}) {
 				}
 				store.reset();
 			}
-			const stats = await sweep(ctx.sessionPersistence, store, {
+			const persistence = ctx.sessionPersistence;
+			// Current service identities survive Cordis Context proxies. Older
+			// implementations without identity fall back to object identity.
+			const nextPersistenceIdentity = persistence.identity ?? persistence;
+			if (nextPersistenceIdentity !== persistenceIdentity) {
+				trustedRevisionSessions.clear();
+				persistenceIdentity = nextPersistenceIdentity;
+			}
+			const stats = await sweep(persistence, store, {
 				resolveSite: directory.resolveSite,
 				logger,
-				dshVersion: config.dshVersion
+				dshVersion: config.dshVersion,
+				trustedRevisionSessions
 			});
 			if (stats.updated > 0 || stats.failed > 0) {
 				logger?.info?.(
@@ -826,7 +876,6 @@ export function apply(ctx, userConfig = {}) {
 	// dynamically and its absence costs exactly itself.
 	let settingsScope;
 	let settingsRemove;
-	let settingsRemoveUserAuth;
 	let settingsFailure;
 
 	// `settings` is WAITED FOR, not sampled.
@@ -844,12 +893,14 @@ export function apply(ctx, userConfig = {}) {
 	// service a composition need not have at all.
 	if (typeof ctx.inject === "function") {
 		ctx.inject(["settings"], (scoped) => {
+			if (typeof scoped.settings.configure === "function") {
+				scoped.effect(() => scoped.settings.configure({ auto: false }, ctx.fiber), "tokenledger: custom settings page");
+			}
 			let live = true;
 			scoped.on?.("dispose", () => {
 				live = false;
 				settingsScope = undefined;
 				settingsRemove = undefined;
-				settingsRemoveUserAuth = undefined;
 				dashboardController?.notifyChanged(true);
 			});
 			void import("./settings-schema.js")
@@ -860,14 +911,13 @@ export function apply(ctx, userConfig = {}) {
 								// the directory picks the change up on the next sweep.
 								Object.assign(config, next);
 								dashboardController?.notifyChanged(true);
-							})
+							}, ctx)
 						: undefined
 				)
 				.then((registered) => {
 					if (!live || registered === undefined) return;
 					settingsScope = registered.scope;
 					settingsRemove = registered.remove;
-					settingsRemoveUserAuth = registered.removeUserAuth;
 					settingsFailure = undefined;
 					// Relay discovery reads provider profiles THROUGH this service, so
 					// the sweep that ran at startup — before the service existed — found
@@ -1013,46 +1063,13 @@ export function apply(ctx, userConfig = {}) {
 	// to the per-key readers exactly as before.
 	let balance;
 
-	/** The stored credentials as a renderer may SEE them: never the token. */
-	const userAuth = (origin) => {
-		const all = config.userAuth ?? {};
-		const view = (entry) => ({
-			userId: typeof entry?.userId === "number" ? entry.userId : undefined,
-			hasToken: typeof entry?.token === "string" && entry.token !== ""
-		});
-		if (origin !== undefined) {
-			const hit = all[origin];
-			return hit === undefined ? {} : { [origin]: view(hit) };
-		}
-		return Object.fromEntries(Object.entries(all).map(([key, entry]) => [key, view(entry)]));
-	};
-
-	/** Save or clear one origin's entry through the existing settings seam. */
+	const walletCredentials = createWalletCredentials(ctx, { legacyAuth: () => config.userAuth });
+	const allowedWalletOrigins = () => listAccounts(ctx, { softwareOf: fingerprints.software }).map(account => account.origin);
+	/** Renderer receives presence markers only; records stay in credentials. */
+	const userAuth = (origin) => walletCredentials.publicState(origin, allowedWalletOrigins());
 	const saveUserAuth = async (body) => {
-		if (body === null || typeof body !== "object") throw new Error("invalid-body");
-		const origin = normalizeOrigin(body.origin);
-		if (origin === undefined) throw new Error("invalid-origin");
-		if (body.remove === true) {
-			if (settingsRemoveUserAuth === undefined) throw new Error("settings-not-ready");
-			await settingsRemoveUserAuth(origin);
-			// Mirror the change now: the settings watch is asynchronous and a read
-			// immediately after this write must not see the removed credential.
-			const next = { ...(config.userAuth ?? {}) };
-			delete next[origin];
-			config.userAuth = next;
-		} else {
-			if (settingsScope === undefined) throw new Error("settings-not-ready");
-			const userId = body.userId;
-			if (typeof userId !== "number" || !Number.isInteger(userId) || userId <= 0) {
-				throw new Error("invalid-user-id");
-			}
-			const previous = config.userAuth?.[origin];
-			const token = typeof body.token === "string" && body.token !== "" ? body.token : previous?.token;
-			if (typeof token !== "string" || token === "") throw new Error("invalid-token");
-			config.userAuth = { ...(config.userAuth ?? {}), [origin]: { userId, token } };
-			await settingsScope.update({ userAuth: config.userAuth });
-		}
-		walletReader.forget(origin);
+		await walletCredentials.save(body, allowedWalletOrigins());
+		walletReader.forget(normalizeOrigin(body.origin));
 		dashboardController?.notifyChanged(true);
 	};
 
@@ -1087,15 +1104,21 @@ export function apply(ctx, userConfig = {}) {
 				warmOrigin !== undefined
 					? accounts.find((a) => a.origin === warmOrigin)
 					: id === undefined
-						? accounts[0]
+						? (accounts.find((a) => a.id === config.defaultAccount) ?? accounts[0])
 						: accounts.find((a) => a.id === id);
-			const auth = account === undefined ? undefined : config.userAuth?.[account.origin];
+			let auth;
+			if (isWalletAccount(account)) {
+				try { auth = await walletCredentials.read(account.origin); }
+				catch {
+					return { ok: true, account: account.id, displayName: account.displayName, supported: true, fetched: false, scheme: "newapi", reason: "wallet-credentials-unavailable" };
+				}
+			}
 			if (!shouldUseWallet(account, auth)) {
 				// Warming an account WITHOUT credentials must never fall through
 				// to the per-key read: that spends the site's query budget the
 				// wallet exists to save, and a page load would pay it every time.
 				if (warmOrigin !== undefined) return { ok: true, warmed: false };
-				return baseBalance(id, { signal: request.signal });
+				return baseBalance(account?.id ?? id, { signal: request.signal });
 			}
 			try {
 				const card = await walletReader.read({
@@ -1147,11 +1170,14 @@ export function apply(ctx, userConfig = {}) {
 			// The badge's "today" figure, same rate default as `priced`.
 			todayPriced: (site) => priceToday(store, site, config.rates),
 			accounts: () => listAccounts(ctx, { softwareOf: fingerprints.software }),
+			defaultAccount: () => config.defaultAccount ?? "",
 			projectTitles: () => projectTitles,
 			lastSweepAt: () => lastSweepAt,
 			balance,
 			userAuth,
 			saveUserAuth,
+			readSettings: () => settingsAccess.read(),
+			saveSettings: async (body) => { await settingsAccess.save(body); await runSweepAndPublish(); },
 			logger
 		});
 		if (!served) logger?.info?.("tokenledger: no web server in this composition; the panel will not be served");
@@ -1170,6 +1196,7 @@ export function apply(ctx, userConfig = {}) {
 		priced: (range, site, provider) => priceWithConfiguredRates(store, range, site, config.rates, provider),
 		todayPriced: (site) => priceToday(store, site, config.rates),
 		accounts: () => listAccounts(ctx, { softwareOf: fingerprints.software }),
+		defaultAccount: () => config.defaultAccount ?? "",
 		projectTitles: () => projectTitles,
 		lastSweepAt: () => lastSweepAt
 	};
@@ -1223,4 +1250,4 @@ export function apply(ctx, userConfig = {}) {
 	});
 }
 
-export default { name, inject, apply };
+export default { name, inject, apply, Config };

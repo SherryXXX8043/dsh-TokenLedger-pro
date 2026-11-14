@@ -30,7 +30,8 @@ import { DatabaseSync } from "node:sqlite";
 
 import { createUsageState, totalTokens, cacheHitRate, parseRouteKey, routeKey, zeroBuckets } from "./usage.js";
 
-export const SCHEMA_VERSION = 4;
+// v5 refolds durable assistant settlements/retries and handle-owned fork cuts.
+export const SCHEMA_VERSION = 5;
 
 const COLUMNS = [
 	"inputTokens",

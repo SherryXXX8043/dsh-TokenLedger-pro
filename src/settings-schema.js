@@ -1,26 +1,12 @@
 /**
- * The `tokenledger` user-settings namespace.
+ * Config contract for current DSH and the legacy namespace adapter.
  *
- * Isolated in its own module, and loaded with a dynamic import, because it is
- * the one part of this package that needs a dependency. Everything else runs on
- * Node built-ins. If `@deepseek-ai/schemastery` is missing — a composition
- * assembled by hand, an upstream that moved it — the import fails here, the
- * plugin logs it and carries on with its entry config, and no other capability
- * is lost.
+ * Current editable fields are volatile Config references. Settings owns
+ * revisioned persistence through the Loader entry; this module never rewrites
+ * profile files. Wallet tokens are stored in credentials records by the wallet
+ * module; userAuth remains an ordinary read-only compatibility source.
  *
- * ## Why register at all
- *
- * Two things, neither available from entry config alone:
- *
- * - configuration lands in the `settings.yaml` the user already edits, instead
- *   of in `cordis.patch.yml`, which most users never open;
- * - `watch` makes an edit take effect without restarting DSH.
- *
- * Registration is also the prerequisite for writing: `update()` only works on a
- * registered namespace, which is what lets `/tokenledger site add` persist
- * without the user opening a file at all.
- *
- * @module dsh-tokenledger/settings-schema
+ * @module dsh-tokenledger-pro/settings-schema
  */
 
 /**
@@ -148,6 +134,63 @@ export function buildSchema(z) {
 	});
 }
 
+import z from "@deepseek-ai/schemastery";
+
+/** Current DSH projects Config fields rather than registering namespaces. */
+export const Config = (() => {
+	const schema = buildSchema(z);
+	return z.object({
+		...schema.dict,
+		relays: schema.dict.relays.volatile(),
+		endpoints: schema.dict.endpoints.volatile(),
+		rates: schema.dict.rates.volatile(),
+		defaultAccount: z.string().default("").description("默认显示账户").volatile(),
+		commandEnabled: z.boolean().default(true).description("启用命令"),
+		commandName: z.string().default("tokenledger").description("命令名称")
+	});
+})();
+
+export function configValue(value) {
+	return value && typeof value === "object" && Symbol.for("cosmokit.volatile.write") in value ? value.get() : value;
+}
+
+/** The settings endpoint exposes only editable, non-secret fields. */
+export function createSettingsAccess(ctx, config, options = {}) {
+	const keys = ["relays", "rates", "endpoints", "defaultAccount"];
+	const describe = () => {
+		const settings = ctx.get?.("settings");
+		const entry = ctx.fiber?.entry;
+		const descriptor = settings?.describe?.({ redactSecrets: true }).find(item => item.ns === (entry?.options?.id ?? entry?.id));
+		return { settings, descriptor };
+	};
+	return {
+		read() {
+			const { settings, descriptor } = describe();
+			return { ok: true, writable: descriptor !== undefined && typeof settings?.mutate === "function", revision: descriptor?.revision ?? 0,
+				accounts: (options.accounts?.() ?? []).map(({ id, displayName }) => ({ id, displayName })),
+				value: { relays: config.relays ?? {}, rates: config.rates ?? null, endpoints: config.endpoints ?? [], defaultAccount: config.defaultAccount ?? "" } };
+		},
+		async save(body) {
+			if (!body || !Number.isSafeInteger(body.revision) || !body.value || typeof body.value !== "object" || Array.isArray(body.value)) throw new Error("invalid-settings");
+			if (Object.keys(body.value).some(key => !keys.includes(key))) throw new Error("invalid-settings-field");
+			if (Object.hasOwn(body.value, "relays") && (body.value.relays === null || typeof body.value.relays !== "object" || Array.isArray(body.value.relays))) throw new Error("invalid-settings-relays");
+			if (Object.hasOwn(body.value, "rates") && body.value.rates !== null && !Array.isArray(body.value.rates)) throw new Error("invalid-settings-rates");
+			if (Object.hasOwn(body.value, "endpoints") && !Array.isArray(body.value.endpoints)) throw new Error("invalid-settings-endpoints");
+			if (Object.hasOwn(body.value, "defaultAccount")) {
+				const id = body.value.defaultAccount;
+				if (typeof id !== "string" || id.length > 256) throw new Error("invalid-settings-default-account");
+				if (id !== "" && id !== config.defaultAccount && !(options.accounts?.() ?? []).some(account => account.id === id)) throw new Error("invalid-settings-default-account");
+			}
+			const { settings, descriptor } = describe();
+			if (!descriptor || typeof settings?.mutate !== "function") throw new Error("settings-unavailable");
+			const ops = keys.filter(key => Object.hasOwn(body.value, key)).map(key => key === "rates" && body.value[key] === null
+				? { op: "unset", path: [key] }
+				: { op: "set", path: [key], value: body.value[key] });
+			await settings.mutate(descriptor.ns, ops, body.revision);
+		}
+	};
+}
+
 /** The namespace this plugin owns. */
 export const NAMESPACE = "tokenledger";
 
@@ -160,8 +203,26 @@ export const NAMESPACE = "tokenledger";
  * @param onChange - called with each newly resolved value, including the first.
  * @returns `{ scope, value }`, or undefined if registration was not possible.
  */
-export async function registerNamespace(settings, base, onChange) {
-	const { default: z } = await import("@deepseek-ai/schemastery");
+export async function registerNamespace(settings, base, onChange, ownerCtx) {
+	if (typeof settings.register !== "function" && typeof settings.describe === "function") {
+		const entry = ownerCtx?.fiber?.entry;
+		if (entry === undefined) throw new Error("configuration-entry-unavailable");
+		const ns = entry.options?.id ?? entry.id;
+		const descriptor = () => settings.describe({ redactSecrets: true }).find((item) => item.ns === ns);
+		const scope = {
+			get: () => Object.fromEntries(Object.entries(base).map(([key, value]) => [key, configValue(value)])),
+			update: async (patch) => {
+				const current = descriptor();
+				if (current === undefined) throw new Error("configuration-not-ready");
+				await settings.update(ns, patch, current.revision);
+			}
+		};
+		return {
+			scope,
+			remove: async (route) => { const current = descriptor(); if (!current) throw new Error("configuration-not-ready"); await settings.mutate(ns, [{ op: "unset", path: ["relays", route] }], current.revision); },
+			removeUserAuth: undefined
+		};
+	}
 	const scope = settings.register(NAMESPACE, buildSchema(z), { base });
 	const value = scope.get();
 	onChange?.(value);

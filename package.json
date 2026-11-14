@@ -30,10 +30,14 @@
     "./report": "./src/report.js",
     "./store": "./src/store.js",
     "./subscriptions": "./src/subscriptions.js",
-    "./usage": "./src/usage.js"
+    "./usage": "./src/usage.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "src",
+    "locale",
+    "icon.svg",
     "blue.plugin.json",
     "cordis.patch.yml",
     "LICENSE",
@@ -41,11 +45,14 @@
     "README.md",
     "CHANGELOG.md",
     "docs/PRO-MIGRATION.md",
+    "docs/DESKTOP-SUPPORT.md",
+    "docs/SETTINGS.md",
     "docs/BLUE-MIGRATION.md",
     "docs/images"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.2-rc.3"
   },
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
@@ -68,7 +75,7 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-primitives"
+        "@deepseek-ai/dsh-client-connection"
       ]
     }
   },
@@ -79,13 +86,8 @@
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/schemastery": {
-      "optional": true
-    }
-  },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/schemastery": "^3.19.0"
   }
 }

@@ -135,6 +135,20 @@ test("a replacement spanning a restart is still not double counted", () => {
 	});
 });
 
+test("a retry boundary survives checkpoint reload without replacing its billed attempt", () => {
+	withStore((store) => {
+		let state = store.loadState("s1");
+		applyUsageDelta(state, [message(1, 1, "p", "m", usage(100, 10))]);
+		applyUsageDelta(state, [ev("llm/retry-started", { turn: 1, step: 1 })]);
+		store.commitSession("s1", state);
+		state = store.loadState("s1");
+		applyUsageDelta(state, [message(1, 1, "p", "m", usage(200, 20))]);
+		store.commitSession("s1", state);
+		assert.equal(store.totals().inputTokens, 300);
+		assert.equal(store.totals().requests, 2);
+	});
+});
+
 test("reset clears everything so the next pass rebuilds from seq 0", () => {
 	withStore((store) => {
 		const state = { days: new Map(), lastSample: null, currentRoute: null, consumedSeq: -1 };
@@ -239,7 +253,7 @@ test("diagnostics report counts and identifiers only", () => {
 		store.commitSession("s1", state, { dshVersion: "0.1.0-rc.6" });
 
 		const d = store.diagnostics();
-		assert.equal(d.schemaVersion, 4);
+		assert.equal(d.schemaVersion, 5);
 		assert.equal(d.sessionsTracked, 1);
 		assert.equal(d.sessionsWithUsage, 1);
 		assert.equal(d.firstDay, "2026-08-14");
@@ -265,7 +279,7 @@ test("csv export quotes cells that need it", () => {
 	});
 });
 
-test("opening a v2 database rebuilds the disposable index with the v4 checkpoint shape", () => {
+test("opening a v2 database rebuilds the disposable index with the current checkpoint shape", () => {
 	const dir = mkdtempSync(join(tmpdir(), "tokenledger-schema-"));
 	const path = join(dir, "ledger.sqlite");
 	try {
@@ -288,13 +302,34 @@ test("opening a v2 database rebuilds the disposable index with the v4 checkpoint
 		old.close();
 
 		const migrated = LedgerStore.open(path);
-		assert.equal(migrated.diagnostics().schemaVersion, 4);
+		assert.equal(migrated.diagnostics().schemaVersion, 5);
 		assert.equal(migrated.diagnostics().rollupRows, 0, "old projections are rebuilt from logs instead of altered in place");
 		assert.equal(migrated.checkpointFor("s1"), undefined);
 		migrated.close();
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("opening a v4 database discards prior accounting and its unchanged-revision checkpoints", () => {
+	const dir = mkdtempSync(join(tmpdir(), "tokenledger-accounting-v5-"));
+	const path = join(dir, "ledger.sqlite");
+	try {
+		const seeded = LedgerStore.open(path);
+		const state = createUsageState();
+		applyUsageDelta(state, [message(1, 1, "p", "m", usage(9000, 10))]);
+		seeded.commitSession("fork-child", state, { logRevision: "unchanged-revision" });
+		seeded.close();
+		const old = new DatabaseSync(path);
+		old.prepare("UPDATE meta SET value = '4' WHERE key = 'schemaVersion'").run();
+		old.close();
+		const migrated = LedgerStore.open(path);
+		try {
+			assert.equal(migrated.diagnostics().schemaVersion, 5);
+			assert.equal(migrated.totals().requests, 0);
+			assert.equal(migrated.checkpointFor("fork-child"), undefined, "unchanged logs must be refolded under corrected accounting");
+		} finally { migrated.close(); }
+	} finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("opening a v3 database rebuilds projections that may contain duplicated fork seeds", () => {
@@ -312,7 +347,7 @@ test("opening a v3 database rebuilds projections that may contain duplicated for
 		old.close();
 
 		const migrated = LedgerStore.open(path);
-		assert.equal(migrated.diagnostics().schemaVersion, 4);
+		assert.equal(migrated.diagnostics().schemaVersion, 5);
 		assert.equal(migrated.diagnostics().rollupRows, 0, "v3 projections are rebuilt from the seed-aware boundary");
 		assert.equal(migrated.checkpointFor("fork-child"), undefined);
 		migrated.close();

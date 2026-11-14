@@ -48,6 +48,7 @@ import { unitFromStatus } from "./newapi-user.js";
 import { normalizeWindows } from "./quota.js";
 import { normalizeOrigin } from "./relay-sites.js";
 import { KIMI, MINIMAX, OPENCODE_GO, readZaiCodingPlan } from "./subscriptions.js";
+import { readProviderDirectory } from "./provider-config.js";
 
 /** The vendor's own endpoint, and the only origin the `deepseek` scheme calls. */
 export const DEEPSEEK_ORIGIN = "https://api.deepseek.com";
@@ -112,25 +113,6 @@ export function vendorOf(baseUrl) {
 		return undefined;
 	}
 }
-
-/**
- * Origins for the harness's built-in provider routes, which carry no `baseURL`
- * in the stored profile: the installation resolves their endpoints from its own
- * catalog, and a profile read through the settings seam shows nothing where a
- * hand-configured route would say its origin.
- *
- * Without this table those routes fall into the DeepSeek default — no baseURL
- * meant the shipped DeepSeek origin, by the only convention the module had —
- * which points a Z.ai key at api.deepseek.com and then collapses the second
- * such route as a duplicate vendor. The card fails its reads and the picker
- * never names 智谱 at all, which is what a live install showed. An explicit
- * `baseURL` on the route always wins over this table: a route called anything
- * may point anywhere.
- */
-const BUILTIN_PROVIDER_ORIGINS = new Map([
-	["zai", "https://api.z.ai"],
-	["zai-coding-cn", "https://open.bigmodel.cn"]
-]);
 
 /** How many hops to follow before giving up on a same-origin redirect loop. */
 const MAX_REDIRECTS = 3;
@@ -709,16 +691,6 @@ export async function readBalance(options = {}) {
 	}
 }
 
-/** Walk a settings path; shared shape with `discovery.readAtPath`. */
-function readAt(section, path) {
-	let cursor = section;
-	for (const key of path) {
-		if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return undefined;
-		cursor = cursor[key];
-	}
-	return cursor;
-}
-
 /**
  * Every provider route, with what is known about how to read its balance.
  *
@@ -728,18 +700,13 @@ function readAt(section, path) {
  * @returns `[{ id, displayName, origin, scheme, hasCredential }]`.
  */
 export function listAccounts(ctx, options = {}) {
-	const llm = typeof ctx.get === "function" ? ctx.get("llm") : undefined;
-	const settings = typeof ctx.get === "function" ? ctx.get("settings") : undefined;
-	if (llm === undefined || settings === undefined) return [];
+	return accountsForDirectory(readProviderDirectory(ctx, options), options);
+}
 
-	const readSection = options.readSection ?? ((ns) => settings.get?.(ns));
+function accountsForDirectory(directory, options = {}) {
+	if (!directory.available) return [];
 	const softwareOf = options.softwareOf ?? new Map();
-	let entries;
-	try {
-		entries = llm.listConfigurableProviders?.() ?? [];
-	} catch {
-		return [];
-	}
+	const entries = directory.entries;
 
 	// One entry per ROUTE, not per origin.
 	//
@@ -755,20 +722,11 @@ export function listAccounts(ctx, options = {}) {
 	const perHost = new Map();
 	const out = [];
 	for (const entry of entries) {
-		let profile;
-		try {
-			profile = readAt(readSection(entry.settingsNs), entry.settingsPath ?? []);
-		} catch {
-			continue;
-		}
-		// A profile without a baseURL is either the shipped DeepSeek default or
-		// one of the installation's built-in routes, whose origin lives in the
-		// harness's catalog, not in the stored settings. The table names those;
-		// everything else keeps the DeepSeek convention it always had.
-		const baseUrl =
-			profile?.baseURL ?? profile?.baseUrl ?? BUILTIN_PROVIDER_ORIGINS.get(entry.provider);
+		if (typeof entry?.provider !== "string" || entry.provider === "" || directory.profileFor(entry) === undefined) continue;
+		const baseUrl = directory.endpointFor(entry);
+		if (baseUrl === undefined) continue;
 		const vendor = vendorOf(baseUrl);
-		const origin = isOfficialDeepSeek(baseUrl) ? (normalizeOrigin(baseUrl) ?? DEEPSEEK_ORIGIN) : normalizeOrigin(baseUrl);
+		const origin = normalizeOrigin(baseUrl);
 		if (origin === undefined) continue;
 		// Vendors collapse per origin: two routes at one vendor draw on one
 		// wallet. Relays do not — there the quota belongs to the key.
@@ -791,7 +749,7 @@ export function listAccounts(ctx, options = {}) {
 			// lazily, when a balance is actually requested for that site. A
 			// vendor needs no probe: its origin names its scheme.
 			scheme: vendor?.scheme ?? softwareOf.get(origin),
-			hasCredential: typeof profile?.apiKeyEnv === "string" && profile.apiKeyEnv !== ""
+			hasCredential: directory.referenceFor(entry) !== undefined
 		});
 	}
 
@@ -816,11 +774,13 @@ export function createBalanceReader(ctx, options = {}) {
 	return async (id, request = {}) => {
 		const signal = request.signal;
 		if (signal?.aborted === true) return { ok: true, supported: true, fetched: false, reason: "aborted" };
-		const accounts = listAccounts(ctx, options);
+		const directory = readProviderDirectory(ctx, options);
+		const accounts = accountsForDirectory(directory, options);
 		if (accounts.length === 0) return { ok: true, supported: false, reason: "no-provider-directory" };
 
 		const account = id === undefined ? accounts[0] : accounts.find((a) => a.id === id);
 		if (account === undefined) return { ok: true, supported: false, reason: "unknown-account" };
+		const reference = referenceFor(directory, account);
 
 		// Fingerprint on demand. Probing every relay at startup was six
 		// unauthenticated requests for a column nothing read; probing the one a
@@ -852,11 +812,11 @@ export function createBalanceReader(ctx, options = {}) {
 		}
 
 		const credentials = typeof ctx.get === "function" ? ctx.get("credentials") : undefined;
-		const reference = referenceFor(ctx, account, options);
 		const apiKey =
 			reference === undefined || credentials === undefined
 				? undefined
-				: await Promise.resolve(credentials.resolve?.(reference))
+				: await Promise.resolve()
+						.then(() => credentials.resolve?.(reference))
 						.then((hit) => hit?.value ?? hit)
 						.catch(() => undefined);
 		if (signal?.aborted === true) return { ok: true, account: account.id, supported: true, fetched: false, reason: "aborted" };
@@ -875,15 +835,8 @@ export function createBalanceReader(ctx, options = {}) {
 }
 
 /** The credential reference on the route that serves this account. */
-function referenceFor(ctx, account, options) {
-	const settings = typeof ctx.get === "function" ? ctx.get("settings") : undefined;
-	const llm = typeof ctx.get === "function" ? ctx.get("llm") : undefined;
-	if (settings === undefined || llm === undefined) return undefined;
-	const readSection = options.readSection ?? ((ns) => settings.get?.(ns));
-	for (const entry of llm.listConfigurableProviders?.() ?? []) {
-		if (entry.provider !== account.id) continue;
-		const profile = readAt(readSection(entry.settingsNs), entry.settingsPath ?? []);
-		return typeof profile?.apiKeyEnv === "string" ? profile.apiKeyEnv : undefined;
-	}
-	return undefined;
+function referenceFor(directory, account) {
+	const entry = directory.entries.find((item) => item.provider === account.id);
+	if (entry === undefined || normalizeOrigin(directory.endpointFor(entry)) !== account.origin) return undefined;
+	return directory.referenceFor(entry);
 }

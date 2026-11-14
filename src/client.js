@@ -86,11 +86,9 @@ window.__ModuleLoader__.load({
 		let react;
 		let jsx;
 		let jsxs;
-		let primitives;
 		try {
 			react = require("react");
 			({ jsx, jsxs } = require("react/jsx-runtime"));
-			primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 		} catch (error) {
 			// A require that throws inside a factory takes the whole bundle down
 			// with no other trace. Naming the specifier turns "the panel is missing"
@@ -99,10 +97,21 @@ window.__ModuleLoader__.load({
 			throw error;
 		}
 
+		function LedgerIcon({ size = 16, active = false } = {}) {
+			return jsx("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: active ? 2 : 1.6, "aria-hidden": true, focusable: false, children: jsx("path", { d: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h3M14 15h2M8 18h3M14 18h2" }) });
+		}
+		function RefreshIcon({ size = 14 } = {}) {
+			return jsx("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, "aria-hidden": true, focusable: false, children: jsx("path", { d: "M20 5v6h-6M20 11a8 8 0 1 0-2 7" }) });
+		}
+		function CloseIcon({ size = 16 } = {}) {
+			return jsx("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, "aria-hidden": true, focusable: false, children: jsx("path", { d: "m6 6 12 12M18 6 6 18" }) });
+		}
+
 		const NS = "tokenLedger";
-		const USAGE_PATH = "/api/tokenledger/usage";
-		const BALANCE_PATH = "/api/tokenledger/balance";
-		const USERAUTH_PATH = "/api/tokenledger/userauth";
+		// Document-relative URLs preserve a remote Desktop host's routing prefix.
+		const USAGE_PATH = "api/tokenledger/usage";
+		const BALANCE_PATH = "api/tokenledger/balance";
+		const USERAUTH_PATH = "api/tokenledger/userauth";
 		/** A year of whole weeks; must match the host's window or the strip has holes. */
 		const ACTIVITY_DAYS = 371;
 
@@ -184,8 +193,8 @@ window.__ModuleLoader__.load({
 			"@media (prefers-color-scheme:dark){.tkl_panel{--tkl-scheme:dark;--tkl-option-bg:#2b2c2f;--tkl-option-fg:#ededed;--tkl-level-1:#065f46;--tkl-level-2:#059669;--tkl-level-3:#10b981;--tkl-level-4:#34d399;--tkl-direct:#6b7280;--tkl-series-0:#38bdf8;--tkl-series-1:#fbbf24;--tkl-series-2:#a78bfa;--tkl-series-3:#2dd4bf;--tkl-series-4:#f472b6;--tkl-series-5:#a3e635}}",
 			// An explicit theme choice must win over the media query in BOTH
 			// directions, so each is stated rather than inherited.
-			"[data-theme='dark'] .tkl_panel{--tkl-scheme:dark;--tkl-option-bg:#2b2c2f;--tkl-option-fg:#ededed;--tkl-level-1:#065f46;--tkl-level-2:#059669;--tkl-level-3:#10b981;--tkl-level-4:#34d399;--tkl-direct:#6b7280;--tkl-series-0:#38bdf8;--tkl-series-1:#fbbf24;--tkl-series-2:#a78bfa;--tkl-series-3:#2dd4bf;--tkl-series-4:#f472b6;--tkl-series-5:#a3e635}",
-			"[data-theme='light'] .tkl_panel{--tkl-scheme:light;--tkl-option-bg:#fff;--tkl-option-fg:#1d1f23;--tkl-level-1:#a7f3d0;--tkl-level-2:#6ee7b7;--tkl-level-3:#34d399;--tkl-level-4:#10b981;--tkl-direct:#8b93a7;--tkl-series-0:#0ea5e9;--tkl-series-1:#f59e0b;--tkl-series-2:#8b5cf6;--tkl-series-3:#14b8a6;--tkl-series-4:#ec4899;--tkl-series-5:#84cc16}",
+			"body[data-ds-dark-theme] .tkl_panel,[data-theme='dark'] .tkl_panel{--tkl-scheme:dark;--tkl-option-bg:#2b2c2f;--tkl-option-fg:#ededed;--tkl-level-1:#065f46;--tkl-level-2:#059669;--tkl-level-3:#10b981;--tkl-level-4:#34d399;--tkl-direct:#6b7280;--tkl-series-0:#38bdf8;--tkl-series-1:#fbbf24;--tkl-series-2:#a78bfa;--tkl-series-3:#2dd4bf;--tkl-series-4:#f472b6;--tkl-series-5:#a3e635}",
+			"body:not([data-ds-dark-theme]) .tkl_panel,[data-theme='light'] .tkl_panel{--tkl-scheme:light;--tkl-option-bg:#fff;--tkl-option-fg:#1d1f23;--tkl-level-1:#a7f3d0;--tkl-level-2:#6ee7b7;--tkl-level-3:#34d399;--tkl-level-4:#10b981;--tkl-direct:#8b93a7;--tkl-series-0:#0ea5e9;--tkl-series-1:#f59e0b;--tkl-series-2:#8b5cf6;--tkl-series-3:#14b8a6;--tkl-series-4:#ec4899;--tkl-series-5:#84cc16}",
 
 			".tkl_header{box-sizing:border-box;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;flex:none;justify-content:space-between;align-items:center;min-height:44px;padding:10px 12px;display:flex;gap:8px}",
 			".tkl_headerLeft{align-items:center;gap:8px;display:flex;min-width:0}",
@@ -204,7 +213,7 @@ window.__ModuleLoader__.load({
 			// The stat cards ARE the range control, so they are buttons that read
 			// as cards rather than a separate selector duplicating the same three
 			// words in the header.
-			".tkl_stat{cursor:pointer;font:inherit;text-align:left;transition:background .12s}",
+			".tkl_stat{cursor:pointer;font:inherit;text-align:left;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);transition:background .12s}",
 			".tkl_stat:hover{background:var(--dsw-alias-interactive-bg-hover)}",
 			".tkl_stat[data-on]{border-color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-interactive-bg-active)}",
 			".tkl_zone{color:var(--dsw-alias-label-caption);margin-left:auto;font-size:10px;line-height:16px;font-variant-numeric:tabular-nums}",
@@ -349,13 +358,13 @@ window.__ModuleLoader__.load({
 			// under the note instead.
 			".tkl_balance > .tkl_setBtn{margin-top:8px;align-self:flex-start}",
 			".tkl_dlgOverlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.32);display:flex;align-items:center;justify-content:center}",
-			".tkl_dlg{width:420px;max-width:calc(100vw - 32px);max-height:80vh;overflow-y:auto;box-sizing:border-box;background:color-mix(in srgb,var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-base)) var(--dsw-alias-glass-opacity,90%),transparent);border:1px solid var(--dsw-alias-border-l1);border-radius:var(--tkl-radius);box-shadow:var(--dsw-shadow-lv2);padding:14px 16px}",
+			".tkl_dlg{width:420px;max-width:calc(100vw - 32px);max-height:80vh;overflow-y:auto;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:var(--tkl-radius);box-shadow:var(--dsw-shadow-lv2);padding:14px 16px}",
 			".tkl_dlgHead{display:flex;align-items:center;gap:8px;margin-bottom:8px}",
 			".tkl_dlgTitle{color:var(--dsw-alias-label-primary);flex:1;font-size:13px;font-weight:500;line-height:20px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-			".tkl_steps{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:18px;margin:0 0 10px;padding-left:18px}",
+			".tkl_steps{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:18px;margin:0 0 10px;padding-left:18px}",
 			".tkl_field{display:block;margin-bottom:10px}",
 			".tkl_fieldLabel{color:var(--dsw-alias-label-secondary);display:block;font-size:11px;line-height:16px;margin-bottom:3px}",
-			".tkl_input{background:var(--dsw-alias-interactive-bg-active);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--tkl-radius-xs);box-sizing:border-box;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;padding:5px 8px;width:100%}",
+			".tkl_input{background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--tkl-radius-xs);box-sizing:border-box;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;padding:5px 8px;width:100%}",
 			".tkl_input:focus{border-color:var(--dsw-alias-label-tertiary);outline:none}",
 			".tkl_actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}",
 			".tkl_btn{background:0 0;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--tkl-radius-xs);color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:12px;padding:4px 12px}",
@@ -392,16 +401,32 @@ window.__ModuleLoader__.load({
 			".tkl_skel{background:var(--dsw-alias-bg-skeleton);border-radius:var(--tkl-radius-xs);height:12px;animation:tkl_pulse 1.4s ease-in-out infinite}",
 			".tkl_skelStat{height:52px;border-radius:var(--tkl-radius-sm)}",
 			"@keyframes tkl_pulse{0%,100%{opacity:1}50%{opacity:.45}}",
+			".tkl_settings{--tkl-radius-xs:6px;color:var(--dsw-alias-label-primary);padding:12px;min-width:0}.tkl_settingsJson{box-sizing:border-box;display:block;width:100%;resize:vertical;font-family:monospace;line-height:1.5;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.tkl_settingsDialog{box-sizing:border-box;width:min(720px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:16px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);box-shadow:var(--dsw-shadow-lv2)}.tkl_settingsDialog::backdrop{background:var(--dsw-alias-bg-mask-1)}.tkl_settings button:disabled{cursor:default;opacity:.5}",
 			"@media (prefers-reduced-motion:reduce){.tkl_skel{animation:none}}"
 		].join("");
 
+		const PAGE_CSS = ".tkl_panel.tkl_page{position:relative;inset:auto;width:100%;max-width:100%;height:100%;max-height:none;border:0;border-radius:0;box-shadow:none;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.tkl_pageRoot{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}.tkl_page>.tkl_body{width:100%;max-width:1100px;margin:0 auto;box-sizing:border-box}.tkl_page>.tkl_header{flex:none}.tkl_page .tkl_sectionTitle,.tkl_page .tkl_table th,.tkl_page .tkl_note,.tkl_page .tkl_caption,.tkl_page .tkl_statLabel{color:var(--dsw-alias-label-secondary)}";
 		const STYLE_ID = "dsh-tokenledger-pro/panel.css";
-		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(STYLE_ID) + "]") === null) {
-			const tag = document.createElement("style");
-			tag.dataset.plugin = "dsh-tokenledger-pro";
-			tag.dataset.pluginCss = STYLE_ID;
-			tag.textContent = css;
-			document.head.appendChild(tag);
+		function mountStyles() {
+			if (typeof document === "undefined") return undefined;
+			let tag = document.querySelector("style[data-plugin-css=" + JSON.stringify(STYLE_ID) + "]");
+			if (tag === null) {
+				tag = document.createElement("style");
+				tag.dataset.plugin = "dsh-tokenledger-pro";
+				tag.dataset.pluginCss = STYLE_ID;
+				tag.textContent = css + PAGE_CSS;
+				document.head.appendChild(tag);
+			}
+			// A newer factory may overlap the old apply during HMR.
+			tag.textContent = css + PAGE_CSS;
+			// Count owners so an overlapping reload cannot remove the live sheet.
+			tag.tokenLedgerOwners = (tag.tokenLedgerOwners ?? 0) + 1;
+			let live = true;
+			return () => {
+				if (!live) return;
+				live = false;
+				if (--tag.tokenLedgerOwners === 0) tag.remove();
+			};
 		}
 
 		const S = {
@@ -572,8 +597,14 @@ window.__ModuleLoader__.load({
 			return symbol === "" ? `${text} ${currency ?? ""}`.trim() : `${symbol}${text}`;
 		}
 
+		function request(path, init = {}) {
+			const transport = globalThis.__DSH_TRANSPORT__;
+			if (typeof transport?.fetch === "function") return transport.fetch(path, init);
+			return globalThis.fetch(path, init);
+		}
+
 		async function fetchJson(path, signal) {
-			const response = await fetch(path, { headers: { accept: "application/json" }, signal });
+			const response = await request(path, { headers: { accept: "application/json" }, signal });
 			if (!response.ok) throw new Error(`HTTP ${response.status}`);
 			const payload = await response.json();
 			if (payload === null || typeof payload !== "object" || payload.ok !== true) {
@@ -646,24 +677,24 @@ window.__ModuleLoader__.load({
 				const controller = new AbortController();
 				const force = forceNonce !== prevForce.current;
 				prevForce.current = forceNonce;
-				setState((prev) => ({ status: "loading", data: prev.data }));
+				setState((prev) => ({ status: "loading", account, data: prev.account === account ? prev.data : undefined }));
 				const params = account === undefined ? [] : [`account=${encodeURIComponent(account)}`];
 				if (force) params.push("force=1");
 				const query = params.length === 0 ? "" : `?${params.join("&")}`;
 				fetchJson(BALANCE_PATH + query, controller.signal).then(
 					(data) => {
-						if (!controller.signal.aborted) setState({ status: "ready", data });
+						if (!controller.signal.aborted) setState({ status: "ready", account, data });
 					},
 					() => {
 						// A balance that cannot be read is not worth an error banner over
 						// a panel whose real subject is token usage.
-						if (!controller.signal.aborted) setState((prev) => ({ status: "off", data: prev.data }));
+						if (!controller.signal.aborted) setState((prev) => ({ status: "off", account, data: prev.account === account ? prev.data : undefined }));
 					}
 				);
 				return () => controller.abort();
 			}, [open, account, nonce, forceNonce]);
 
-			return state;
+			return state.account === account ? state : { status: open ? "loading" : "idle", account };
 		}
 		//#endregion
 
@@ -1579,12 +1610,23 @@ window.__ModuleLoader__.load({
 			const [saved, setSaved] = react.useState(undefined);
 			const [busy, setBusy] = react.useState(false);
 			const [error, setError] = react.useState(undefined);
+			const pending = react.useRef(new Set());
+			const live = react.useRef(false);
 
 			react.useEffect(() => {
-				let live = true;
-				fetchJson(`${USERAUTH_PATH}?origin=${encodeURIComponent(account.origin)}`).then(
+				live.current = true;
+				return () => {
+					live.current = false;
+					for (const controller of pending.current) controller.abort();
+					pending.current.clear();
+				};
+			}, [account.origin]);
+
+			react.useEffect(() => {
+				const controller = new AbortController();
+				fetchJson(`${USERAUTH_PATH}?origin=${encodeURIComponent(account.origin)}`, controller.signal).then(
 					(payload) => {
-						if (!live) return;
+						if (controller.signal.aborted) return;
 						const entry = payload.origins?.[account.origin];
 						setSaved(entry);
 						// Prefill the STATE, not just the value attribute: an untouched
@@ -1594,9 +1636,7 @@ window.__ModuleLoader__.load({
 					},
 					() => {}
 				);
-				return () => {
-					live = false;
-				};
+				return () => controller.abort();
 			}, [account.origin]);
 
 			// Escape closes the DIALOG, not the panel beneath it: the capture-phase
@@ -1614,18 +1654,26 @@ window.__ModuleLoader__.load({
 			}, [onClose]);
 
 			const post = async (payload) => {
-				const response = await fetch(USERAUTH_PATH, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify(payload)
-				});
-				// A 404 here has one meaning worth spelling out: the route the
-				// dialog is posting to does not exist in the RUNNING host, which
-				// still holds the pre-feature plugin code. A restart fixes it; no
-				// amount of retyping the token will.
-				if (response.status === 404) throw new Error(translate("dialog.hostStale"));
-				const result = await response.json().catch(() => undefined);
-				if (result?.ok !== true) throw new Error(result?.error ?? `HTTP ${response.status}`);
+				const controller = new AbortController();
+				pending.current.add(controller);
+				try {
+					const response = await request(USERAUTH_PATH, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(payload),
+						signal: controller.signal
+					});
+					if (controller.signal.aborted) throw new Error("aborted");
+					if (response.status === 404) throw new Error(translate("dialog.hostStale"));
+					const result = await response.json().catch(() => undefined);
+					if (controller.signal.aborted) throw new Error("aborted");
+					if (!response.ok || result?.ok !== true) {
+						const walletErrors = { "legacy-removal-required": "dialog.legacyAuth", "unavailable": "dialog.credentialsUnavailable", "origin-not-allowed": "dialog.originNotAllowed", "write-unconfirmed": "dialog.writeUnconfirmed", "delete-unconfirmed": "dialog.writeUnconfirmed" };
+						throw new Error(walletErrors[result?.error] ? translate(walletErrors[result.error]) : (result?.error ?? `HTTP ${response.status}`));
+					}
+				} finally {
+					pending.current.delete(controller);
+				}
 			};
 
 			const save = async () => {
@@ -1646,11 +1694,11 @@ window.__ModuleLoader__.load({
 							? { origin: account.origin, userId: id }
 							: { origin: account.origin, userId: id, token }
 					);
-					onSaved();
+					if (live.current) onSaved();
 				} catch (e) {
-					setError(translate("dialog.saveFailed", { reason: String(e?.message ?? e) }));
+					if (live.current) setError(translate("dialog.saveFailed", { reason: String(e?.message ?? e) }));
 				} finally {
-					setBusy(false);
+					if (live.current) setBusy(false);
 				}
 			};
 
@@ -1659,11 +1707,11 @@ window.__ModuleLoader__.load({
 				setError(undefined);
 				try {
 					await post({ origin: account.origin, remove: true });
-					onSaved();
+					if (live.current) onSaved();
 				} catch (e) {
-					setError(translate("dialog.saveFailed", { reason: String(e?.message ?? e) }));
+					if (live.current) setError(translate("dialog.saveFailed", { reason: String(e?.message ?? e) }));
 				} finally {
-					setBusy(false);
+					if (live.current) setBusy(false);
 				}
 			};
 
@@ -1687,7 +1735,7 @@ window.__ModuleLoader__.load({
 										className: S.iconButton,
 										"aria-label": translate("action.close"),
 										onClick: onClose,
-										children: jsx(primitives.IconCloseOutline16, { size: 16 })
+										children: jsx(CloseIcon, { size: 16 })
 									})
 								]
 							}),
@@ -1925,8 +1973,15 @@ window.__ModuleLoader__.load({
 		 * collapsed to its rail — so everything else, including the panel's own
 		 * open state and chrome, belongs to this component.
 		 */
-		function TokenLedgerPanel({ wide, t }) {
-			const [open, setOpen] = react.useState(false);
+		function resolveDisplayAccount(data, selected) {
+			const accounts = data?.accounts ?? [];
+			return accounts.find(item => item.id === selected)?.id
+				?? accounts.find(item => item.id === data?.defaultAccount)?.id
+				?? accounts[0]?.id;
+		}
+
+		function TokenLedgerPanel({ wide, t, fullPage = false }) {
+			const [open, setOpen] = react.useState(fullPage);
 			const [range, setRange] = react.useState("all");
 			const [site, setSite] = react.useState(undefined);
 			const [account, setAccount] = react.useState(undefined);
@@ -1939,7 +1994,8 @@ window.__ModuleLoader__.load({
 			const [dialogFor, setDialogFor] = react.useState(undefined);
 			const days = (RANGES.find((r) => r.id === range) ?? RANGES[2]).days();
 			const state = useUsage(open, days, site, nonce);
-			const balance = useBalance(open, account, nonce, forceNonce);
+			const displayAccount = resolveDisplayAccount(state.data, account);
+			const balance = useBalance(open && state.data !== undefined, displayAccount, nonce, forceNonce);
 			const reload = () => setNonce((n) => n + 1);
 			const translate = translateWith(t);
 
@@ -1955,8 +2011,9 @@ window.__ModuleLoader__.load({
 			// panel and drifts out (selecting a figure to copy, dragging the
 			// activity strip) must not be read as a dismissal.
 			const root = react.useRef(null);
+			const [settingsOpen, setSettingsOpen] = react.useState(false);
 			react.useEffect(() => {
-				if (!open) return undefined;
+				if (!open || fullPage) return undefined;
 				const onKey = (event) => {
 					if (event.key === "Escape") setOpen(false);
 				};
@@ -1969,7 +2026,7 @@ window.__ModuleLoader__.load({
 					window.removeEventListener("keydown", onKey);
 					document.removeEventListener("pointerdown", onDown, true);
 				};
-			}, [open]);
+			}, [open, fullPage]);
 
 			const busy = state.status === "loading";
 			// The badge answers today's two questions at a glance: tokens used and
@@ -1985,9 +2042,9 @@ window.__ModuleLoader__.load({
 
 			return jsxs("div", {
 				ref: root,
-				className: wide === false ? `${S.layer} ${S.rail}` : S.layer,
+				className: fullPage ? "tkl_pageRoot" : wide === false ? `${S.layer} ${S.rail}` : S.layer,
 				children: [
-					jsxs("button", {
+					!fullPage && jsxs("button", {
 						type: "button",
 						className: S.badge,
 						...(open ? { "data-active": "" } : {}),
@@ -1995,15 +2052,15 @@ window.__ModuleLoader__.load({
 						"aria-label": translate("panel.title"),
 						onClick: () => setOpen((value) => !value),
 						children: [
-							jsx("span", { className: S.badgeIcon, children: jsx(primitives.IconDataOutline16, { size: 16 }) }),
+							jsx("span", { className: S.badgeIcon, children: jsx(LedgerIcon, { size: 16 }) }),
 							jsx("span", { className: S.badgeLabel, children: translate("panel.title") }),
 							jsx("span", { className: S.badgeValue, children: totalLabel })
 						]
 					}),
 					open &&
 						jsxs("div", {
-							className: S.panel,
-							role: "dialog",
+							className: fullPage ? `${S.panel} tkl_page` : S.panel,
+							role: fullPage ? "region" : "dialog",
 							"aria-label": translate("panel.title"),
 							children: [
 								jsxs("div", {
@@ -2016,6 +2073,7 @@ window.__ModuleLoader__.load({
 										jsxs("div", {
 											className: S.headerActions,
 											children: [
+												jsx("button", { type: "button", className: S.btn, onClick: () => setSettingsOpen(true), children: translate("settings.open") }),
 													jsx("button", {
 													type: "button",
 													className: S.iconButton,
@@ -2027,14 +2085,14 @@ window.__ModuleLoader__.load({
 															setForceNonce((f) => f + 1);
 														}
 													},
-													children: jsx(primitives.IconRefreshOutline14, { size: 14 })
+													children: jsx(RefreshIcon, { size: 14 })
 												}),
-												jsx("button", {
+												!fullPage && jsx("button", {
 													type: "button",
 													className: S.iconButton,
 													"aria-label": translate("action.close"),
 													onClick: () => setOpen(false),
-													children: jsx(primitives.IconCloseOutline16, { size: 16 })
+													children: jsx(CloseIcon, { size: 16 })
 												})
 											]
 										})
@@ -2049,7 +2107,7 @@ window.__ModuleLoader__.load({
 										onSelect: setSite,
 										range,
 										onRange: setRange,
-										account,
+										account: displayAccount,
 										onAccount: setAccount,
 										translate,
 										onRetry: reload,
@@ -2058,6 +2116,7 @@ window.__ModuleLoader__.load({
 								})
 							]
 						}),
+						settingsOpen ? jsx(SettingsDialog, { translate, onClose: () => setSettingsOpen(false), onSaved: () => { setAccount(undefined); reload(); } }) : null,
 						dialogFor === undefined
 							? null
 							: jsx(UserAuthDialog, {
@@ -2078,7 +2137,27 @@ window.__ModuleLoader__.load({
 
 		//#region locales
 		const zh = {
-			"panel.title": "用量账本",
+			"panel.title": "用量账本 Pro",
+			"settings.title": "账本设置",
+			"settings.defaultAccount": "默认显示账户",
+			"settings.accountAuto": "自动选择（首个可用账户）",
+			"settings.accountMissing": "{id}（账户已不可用，展示时自动回退）",
+			"settings.defaultAccountHelp": "打开账本时优先显示此账户。临时切换不改变默认值；账户删除后自动回退。",
+			"settings.open": "设置",
+			"settings.summary": "路由覆盖、模型费率和自定义余额端点",
+			"settings.help": "以下字段使用 JSON。站点通常自动发现，无需重复填写。不要在这里填写密钥或访问令牌。费率填 null 恢复默认行为。",
+			"settings.relays": "路由覆盖（JSON 对象）",
+			"settings.rates": "模型费率（JSON 数组或 null）",
+			"settings.endpoints": "自定义余额端点（JSON 数组）",
+			"settings.loadFailed": "读取设置失败，请重新读取；若刚更新过插件，请重启 Desktop 后再试。",
+			"settings.saveFailed": "保存失败，请检查配置内容与宿主连接后重试。",
+			"settings.invalidJson": "JSON 或字段类型不正确：路由应为对象，费率应为数组或 null，端点应为数组。",
+			"settings.conflict": "配置已被其他窗口修改。请先重新读取，再编辑保存。",
+			"settings.readOnly": "当前宿主尚不能保存本插件配置，请检查插件是否更新并重启。",
+			"settings.saved": "设置已保存。",
+			"settings.reload": "重新读取",
+			"settings.save": "保存设置",
+			"settings.saving": "保存中…",
 			"range.today": "今日",
 			"range.month": "本月",
 			"range.all": "累计",
@@ -2158,6 +2237,10 @@ window.__ModuleLoader__.load({
 			"balance.stale": "已限流，{at} 前不刷新 · {ago}的结果",
 			"balance.unparsed": "接口答了，但认不出配额字段（{reason}）。可以把这句话反馈给我们。",
 			"dialog.title": "设置余额 — New API 个人账户",
+			"dialog.legacyAuth": "旧配置中仍保存着该站点令牌，请先清理旧 userAuth 来源，再删除凭据记录。",
+			"dialog.credentialsUnavailable": "宿主凭据库暂不可用，请检查连接或重启后重试。",
+			"dialog.originNotAllowed": "该站点已不在当前账户目录中，请刷新账户列表。",
+			"dialog.writeUnconfirmed": "未能确认凭据保存或删除结果，请重新读取状态后再操作。",
 			"dialog.step1": "登录该中转站的网页控制台",
 			"dialog.step2": "个人设置 → 生成「系统访问令牌」(access_token)",
 			"dialog.step3": "个人设置 → 复制用户 ID（数字）",
@@ -2198,7 +2281,27 @@ window.__ModuleLoader__.load({
 			"footer.unattributed": "{n} 行认不出是哪个站"
 		};
 		const en = {
-			"panel.title": "Token Ledger",
+			"panel.title": "DSH TokenLedger Pro",
+			"settings.title": "Ledger settings",
+			"settings.defaultAccount": "Default account",
+			"settings.accountAuto": "Automatic (first available account)",
+			"settings.accountMissing": "{id} (unavailable; display falls back automatically)",
+			"settings.defaultAccountHelp": "Show this account when opening the ledger. Temporary selections do not change the default. Removed accounts fall back automatically.",
+			"settings.open": "Settings",
+			"settings.summary": "Relay overrides, model rates and custom balance endpoints",
+			"settings.help": "Use JSON below. Providers are normally discovered automatically. Do not enter API keys or access tokens here. Set rates to null to restore default pricing.",
+			"settings.relays": "Relay overrides (JSON object)",
+			"settings.rates": "Model rates (JSON array or null)",
+			"settings.endpoints": "Custom balance endpoints (JSON array)",
+			"settings.loadFailed": "Could not load settings. Reload them, or restart Desktop if the plugin was just updated.",
+			"settings.saveFailed": "Could not save settings. Check the values and Host connection, then retry.",
+			"settings.invalidJson": "Invalid JSON or field type: relays must be an object, rates an array or null, endpoints an array.",
+			"settings.conflict": "Another window changed these settings. Reload them before editing and saving.",
+			"settings.readOnly": "The Host cannot save this plugin configuration yet. Check the plugin update and restart.",
+			"settings.saved": "Settings saved.",
+			"settings.reload": "Reload settings",
+			"settings.save": "Save settings",
+			"settings.saving": "Saving…",
 			"range.today": "Today",
 			"range.month": "This month",
 			"range.all": "All time",
@@ -2278,6 +2381,10 @@ window.__ModuleLoader__.load({
 			"balance.stale": "rate-limited until {at} · showing {ago}",
 			"balance.unparsed": "The endpoint answered, but none of the quota fields were where they were expected ({reason}). Worth reporting.",
 			"dialog.title": "Set balance — New API wallet",
+			"dialog.legacyAuth": "Legacy userAuth configuration still contains this site's token. Remove that source before deleting the credential record.",
+			"dialog.credentialsUnavailable": "The Host credential store is unavailable. Check the connection or restart and retry.",
+			"dialog.originNotAllowed": "This site is no longer in the account directory. Refresh the account list.",
+			"dialog.writeUnconfirmed": "The credential change could not be confirmed. Reload its state before another action.",
 			"dialog.step1": "Sign in to the relay's web console.",
 			"dialog.step2": "Personal settings → generate a System Access Token (access_token).",
 			"dialog.step3": "Personal settings → copy your numeric user ID.",
@@ -2339,61 +2446,187 @@ window.__ModuleLoader__.load({
 		/** Client-half services this bundle needs before it can register. */
 		const inject = ["slots", "locale"];
 
-		/**
-		 * Register the seat.
-		 *
-		 * `slots.inject` rather than a bare `register`, so a late-declared or
-		 * re-declared slot is followed instead of missed — the sidebar declares
-		 * this hole, and this bundle must not assume it is already there.
-		 */
-		function apply(ctx) {
-			console.info("[tokenledger] apply() called; registering the footer seat");
-			// Warm the wallet cache at PAGE LOAD, once: one passive read per
-			// configured site, so the first panel open finds the host's cache
-			// hot and renders instantly instead of waiting on the network. The
-			// host's freshness window and throttle backoff govern warm reads
-			// exactly like panel-opened ones.
-			let warmed = false;
-			const warmWallets = () => {
-				if (warmed || typeof fetch !== "function") return;
-				warmed = true;
-				fetchJson(`${USERAUTH_PATH}`)
-					.then((payload) =>
-						Promise.all(
-							Object.entries(payload.origins ?? {})
-								.filter(([, entry]) => entry.hasToken === true)
-								.map(([origin]) =>
-									fetchJson(`${BALANCE_PATH}?origin=${encodeURIComponent(origin)}`).catch(() => undefined)
-								)
-						)
-					)
-					.catch(() => undefined);
+		const SETTINGS_PATH = "api/tokenledger/settings";
+		function SettingsForm({ t, translate: suppliedTranslate, onSaved }) {
+			const translate = suppliedTranslate ?? translateWith(t);
+			const [snapshot, setSnapshot] = react.useState(undefined);
+			const [draft, setDraft] = react.useState({ relays: "{}", rates: "null", endpoints: "[]" });
+			const [loading, setLoading] = react.useState(true);
+			const [saving, setSaving] = react.useState(false);
+			const [error, setError] = react.useState(undefined);
+			const [message, setMessage] = react.useState(undefined);
+			const [nonce, setNonce] = react.useState(0);
+			const live = react.useRef(false);
+			const pending = react.useRef(new Set());
+			const [defaultAccount, setDefaultAccount] = react.useState("");
+			react.useEffect(() => {
+				live.current = true;
+				return () => { live.current = false; for (const controller of pending.current) controller.abort(); pending.current.clear(); };
+			}, []);
+			react.useEffect(() => {
+				const controller = new AbortController();
+				setLoading(true); setError(undefined);
+				fetchJson(SETTINGS_PATH, controller.signal).then(payload => {
+					if (controller.signal.aborted) return;
+					setSnapshot(payload);
+					setDefaultAccount(payload.value?.defaultAccount ?? "");
+					setDraft(Object.fromEntries(["relays", "rates", "endpoints"].map(key => [key, JSON.stringify(payload.value?.[key] ?? (key === "relays" ? {} : key === "rates" ? null : []), null, 2)])));
+				}, () => { if (!controller.signal.aborted) { setSnapshot(undefined); setError(translate("settings.loadFailed")); } })
+					.finally(() => { if (!controller.signal.aborted) setLoading(false); });
+				return () => controller.abort();
+			}, [nonce]);
+			const save = async () => {
+				if (saving || loading || snapshot?.writable !== true) return;
+				let value;
+				try {
+					value = Object.fromEntries(Object.entries(draft).map(([key, text]) => [key, JSON.parse(text)]));
+					if (!value.relays || typeof value.relays !== "object" || Array.isArray(value.relays) || (value.rates !== null && !Array.isArray(value.rates)) || !Array.isArray(value.endpoints)) throw new Error("shape");
+				} catch { setError(translate("settings.invalidJson")); return; }
+				const controller = new AbortController(); pending.current.add(controller);
+				setSaving(true); setError(undefined); setMessage(undefined);
+				try {
+					const response = await request(SETTINGS_PATH, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ revision: snapshot.revision, value: { ...value, defaultAccount } }), signal: controller.signal });
+					const result = await response.json();
+					if (!live.current || controller.signal.aborted) return;
+					if (response.status === 409) { setSnapshot(previous => ({ ...previous, writable: false })); setError(translate("settings.conflict")); return; }
+					if (!response.ok || result?.ok !== true) throw new Error("save-failed");
+					setMessage(translate("settings.saved")); setLoading(true); setNonce(n => n + 1); onSaved?.();
+				} catch { if (live.current && !controller.signal.aborted) setError(translate("settings.saveFailed")); }
+				finally { pending.current.delete(controller); if (live.current && !controller.signal.aborted) setSaving(false); }
 			};
-			warmWallets();
+			return jsxs("section", { className: "tkl_settings", "aria-label": translate("settings.title"), children: [
+				jsx("p", { className: S.note, children: translate("settings.help") }),
+				loading && jsx("p", { role: "status", children: translate("state.loading") }),
+				jsxs("label", { className: S.field, children: [
+					jsx("span", { className: S.fieldLabel, children: translate("settings.defaultAccount") }),
+					jsxs("select", { className: S.input, value: defaultAccount, disabled: loading || saving || snapshot?.writable !== true,
+						onChange: event => { setDefaultAccount(event.target.value); setMessage(undefined); }, children: [
+						jsx("option", { value: "", children: translate("settings.accountAuto") }),
+						...(snapshot?.accounts ?? []).map(item => jsx("option", { value: item.id, children: item.displayName ?? item.id }, item.id)),
+						defaultAccount !== "" && !(snapshot?.accounts ?? []).some(item => item.id === defaultAccount)
+							? jsx("option", { value: defaultAccount, children: translate("settings.accountMissing", { id: defaultAccount }) }) : null
+					] }),
+					jsx("p", { className: S.note, children: translate("settings.defaultAccountHelp") })
+				] }),
+				... ["relays", "rates", "endpoints"].map(key => jsxs("label", { className: S.field, children: [
+					jsx("span", { className: S.fieldLabel, children: translate(`settings.${key}`) }),
+					jsx("textarea", { className: `${S.input} tkl_settingsJson`, rows: key === "relays" ? 4 : 6, value: draft[key], spellCheck: false, disabled: loading || saving || snapshot?.writable !== true,
+						onChange: event => { const text = event.target.value; setDraft(previous => ({ ...previous, [key]: text })); setMessage(undefined); } })
+				] }, key)),
+				!loading && snapshot && snapshot.writable !== true && !error && jsx("p", { className: S.note, children: translate("settings.readOnly") }),
+				error && jsx("p", { role: "alert", className: S.error, children: error }),
+				message && jsx("p", { role: "status", children: message }),
+				jsxs("div", { className: S.actions, children: [
+					jsx("button", { type: "button", className: S.btn, disabled: loading || saving, onClick: () => { setMessage(undefined); setNonce(n => n + 1); }, children: translate("settings.reload") }),
+					jsx("button", { type: "button", className: S.btn, disabled: loading || saving || snapshot?.writable !== true, onClick: save, children: translate(saving ? "settings.saving" : "settings.save") })
+				] })
+			] });
+		}
+		function SettingsDialog({ translate, onClose, onSaved }) {
+			const ref = react.useRef(null);
+			react.useEffect(() => {
+				const dialog = ref.current;
+				if (typeof dialog?.showModal === "function") dialog.showModal();
+				else dialog?.setAttribute?.("open", "");
+				return () => { if (dialog?.open) dialog.close?.(); };
+			}, []);
+			return jsxs("dialog", { ref, className: "tkl_settingsDialog", "aria-label": translate("settings.title"), onCancel: event => { event.preventDefault(); onClose(); }, children: [
+				jsxs("div", { className: S.dlgHead, children: [jsx("h2", { className: S.dlgTitle, children: translate("settings.title") }), jsx("button", { type: "button", className: S.btn, onClick: onClose, autoFocus: true, children: translate("action.close") })] }),
+				jsx(SettingsForm, { translate, onSaved })
+			] });
+		}
+		function PluginSettings({ view, t }) {
+			if (view === "summary") return jsx("span", { children: translateWith(t)("settings.summary") });
+			return jsx(SettingsForm, { t });
+		}
+
+		function TokenLedgerPage(props) {
+			return jsx(TokenLedgerPanel, { ...props, fullPage: true });
+		}
+
+		/** Each apply owns its navigation mode, requests and styles. */
+		function apply(ctx) {
+			console.info("[tokenledger] apply() called; registering the ledger panel");
+			ctx.effect(mountStyles, "tokenledger: styles");
+			ctx.effect(() => {
+				const controller = new AbortController();
+				fetchJson(USERAUTH_PATH, controller.signal).then((payload) => {
+					if (controller.signal.aborted) return undefined;
+					return Promise.all(Object.entries(payload.origins ?? {})
+						.filter(([, entry]) => entry.hasToken === true)
+						.map(([origin]) => fetchJson(`${BALANCE_PATH}?origin=${encodeURIComponent(origin)}`, controller.signal).catch(() => undefined)));
+				}).catch(() => undefined);
+				return () => controller.abort();
+			}, "tokenledger: warm wallets");
 			try {
 				ctx.effect(() => ctx.locale.register(NS, { zh, en }), "tokenledger: dictionaries");
 			} catch (error) {
-				// Dictionaries are a nicety; the seat is the point. Losing one must
-				// not cost the other.
 				console.warn("[tokenledger] locale.register failed; falling back to built-in strings:", error);
 			}
+
+			ctx.effect(() => ctx.slots.inject("plugins.bundle.config", () =>
+				ctx.slots.register({ name: "plugins.bundle.config", key: "dsh-tokenledger-pro", locale: NS }, PluginSettings)
+			), "tokenledger: settings page");
+			let panelTranslate = translateWith(undefined);
 			try {
-				ctx.slots.inject("sidebar.footer.action", () => {
-					console.info("[tokenledger] sidebar.footer.action is available; registering");
-					return ctx.slots.register(
-						{ name: "sidebar.footer.action", id: "tokenledger", locale: NS, order: 20 },
-						TokenLedgerPanel
-					);
-				});
-			} catch (error) {
-				console.error("[tokenledger] could not take the footer seat:", error);
-				throw error;
+				panelTranslate = translateWith(ctx.locale.bind?.(NS));
+			} catch {
+				// Older hosts may lack bind; keep the readable built-in title.
 			}
+			let modern = false;
+			const listeners = new Set();
+			const setModern = (value) => {
+				modern = value;
+				for (const listener of listeners) listener(value);
+			};
+			function LegacyPanel(props) {
+				const [hidden, setHidden] = react.useState(modern);
+				react.useEffect(() => {
+					listeners.add(setHidden);
+					setHidden(modern);
+					return () => listeners.delete(setHidden);
+				}, []);
+				return hidden ? null : jsx(TokenLedgerPanel, props);
+			}
+			// A late modern declaration takes over. Its disposal restores the old
+			// footer without ever claiming another plugin's panel key.
+			ctx.effect(() => ctx.slots.inject("sidebar.footer.action", () =>
+				ctx.slots.register({ name: "sidebar.footer.action", id: "tokenledger-pro", locale: NS, order: 20 }, LegacyPanel)
+			), "tokenledger: legacy navigation");
+			ctx.effect(() => ctx.slots.inject("main", () => ctx.slots.inject("sidebar.panellist", () => {
+				let disposeMain;
+				let disposeIcon;
+				try {
+					disposeMain = ctx.slots.register({ name: "main", key: "tokenledger-pro", locale: NS }, TokenLedgerPage);
+					disposeIcon = ctx.slots.register({ name: "sidebar.panellist", id: "tokenledger-pro", locale: NS, order: 20, label: () => panelTranslate("panel.title") }, LedgerIcon);
+					setModern(true);
+					return () => {
+						setModern(false);
+						disposeIcon?.();
+						disposeMain?.();
+					};
+				} catch (error) {
+					disposeIcon?.();
+					disposeMain?.();
+					console.warn("[tokenledger] modern panel unavailable; using legacy navigation:", error);
+					return undefined;
+				}
+			})), "tokenledger: modern navigation");
 		}
 
+		exports.resolveDisplayAccount = resolveDisplayAccount;
+		exports.SettingsForm = SettingsForm;
+		exports.SettingsDialog = SettingsDialog;
+		exports.PluginSettings = PluginSettings;
 		exports.apply = apply;
 		exports.inject = inject;
 		exports.TokenLedgerPanel = TokenLedgerPanel;
+		exports.TokenLedgerPage = TokenLedgerPage;
+		exports.LedgerIcon = LedgerIcon;
+		exports.request = request;
+		exports.fetchJson = fetchJson;
+		exports.useUsage = useUsage;
+		exports.useBalance = useBalance;
 		exports.StatCaption = StatCaption;
 		exports.ACTIVITY_DAYS = ACTIVITY_DAYS;
 		exports.Body = Body;

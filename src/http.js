@@ -308,6 +308,7 @@ export function usagePayload(deps, query) {
 		// The picker renders with the panel rather than after a second round
 		// trip; it is a list of names and origins, no keys and no network.
 		accounts: deps.accounts?.() ?? [],
+		defaultAccount: deps.defaultAccount?.() ?? "",
 		// When the logs were last read, as distinct from when they last changed.
 		// The checkpoint table only advances on a session that moved, so a quiet
 		// hour left the panel claiming to be an hour stale while its figures were
@@ -358,6 +359,112 @@ const KNOWN_SERVICES = [
 	"workspace"
 ];
 
+/**
+ * Carrier-neutral endpoints. Connection admits an authenticated owner Peer before
+ * dispatch, so these handlers never inspect a socket or invent a loopback peer.
+ * Desktop IPC and the Web /api bridge consume the same Host queries.
+ */
+function publicFailure(error) {
+	if (error?.code === "SETTINGS_CONFLICT") return { status: 409, reason: "settings-conflict" };
+	const kinds = {
+		"invalid-json": 400, "payload-too-large": 400,
+		"invalid-body": 400, "invalid-origin": 400, "invalid-user-id": 400, "invalid-token": 400,
+		"origin-not-allowed": 403, "legacy-removal-required": 409,
+		"write-unconfirmed": 409, "delete-unconfirmed": 409, "unavailable": 503
+	};
+	if (Object.hasOwn(kinds, error?.kind)) return { status: kinds[error.kind], reason: error.kind };
+	if (error?.message?.startsWith("invalid-settings")) return { status: 400, reason: "invalid-settings" };
+	return { status: 500, reason: "internal" };
+}
+
+export function registerConnectionRoutes(ctx, connection, deps) {
+	const json = (status, body) => new Response(JSON.stringify(body), {
+		status,
+		headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+	});
+	const route = (path, methods, build) => ctx.effect(() => connection.fetch.register({
+		path,
+		methods,
+		requestBody: "buffered",
+		fetch: async (request) => {
+			if (!methods.includes(request.method)) return json(405, { ok: false, error: "method-not-allowed" });
+			try {
+				request.signal.throwIfAborted();
+				const value = await build(request);
+				request.signal.throwIfAborted();
+				return json(200, value);
+			} catch (error) {
+				if (request.signal.aborted) throw error;
+				const failure = publicFailure(error);
+				deps.logger?.warn?.("tokenledger: %s failed (%s)", path, failure.reason);
+				return json(failure.status, { ok: false, error: failure.reason });
+			}
+		}
+	}), `tokenledger connection ${path}`);
+
+	route(USAGE_PATH, ["GET"], async (request) => {
+		await deps.sweep?.();
+		return usagePayload(deps, parseQuery(request.url));
+	});
+	if (typeof deps.balance === "function") route(BALANCE_PATH, ["GET"], async (request) =>
+		deps.balance(accountOf(request.url), forceOf(request.url), originOf(request.url), { signal: request.signal }));
+	if (typeof deps.userAuth === "function" || typeof deps.saveUserAuth === "function") {
+		route(USERAUTH_PATH, ["GET", "POST"], async (request) => {
+			if (request.method === "GET") return { ok: true, origins: await deps.userAuth?.(originOf(request.url)) ?? {} };
+			if (typeof deps.saveUserAuth !== "function") throw new Error("settings-unavailable");
+			const body = await readFetchJsonBody(request);
+			await deps.saveUserAuth(body);
+			return { ok: true };
+		});
+	}
+	if (typeof deps.readSettings === "function") {
+		route(`${BASE_PATH}/settings`, ["GET", "POST"], async (request) => {
+			if (request.method === "GET") return deps.readSettings();
+			if (typeof deps.saveSettings !== "function") throw new Error("settings-unavailable");
+			await deps.saveSettings(await readFetchJsonBody(request, 256 * 1024));
+			return { ok: true };
+		});
+	}
+	return true;
+}
+
+/** Apply a byte ceiling before parsing a Fetch/IPC request body. */
+async function readFetchJsonBody(request, limit = USERAUTH_BODY_LIMIT) {
+	const reader = request.body?.getReader();
+	if (reader === undefined) throw Object.assign(new Error("invalid-json"), { kind: "invalid-json" });
+	const chunks = [];
+	let size = 0;
+	try {
+		for (;;) {
+			request.signal.throwIfAborted();
+			const { value, done } = await reader.read();
+			if (done) break;
+			size += value.byteLength;
+			if (size > limit) {
+				await reader.cancel().catch(() => {});
+				throw Object.assign(new Error("payload-too-large"), { kind: "payload-too-large" });
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	try {
+		return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+	} catch {
+		throw Object.assign(new Error("invalid-json"), { kind: "invalid-json" });
+	}
+}
+
+/** Legacy HTTP handlers also enforce the current Host's authentication fence. */
+function screenHttpRequest(ctx, req) {
+	const refused = screenRequest(req);
+	if (refused !== undefined) return refused;
+	const connection = typeof ctx.get === "function" ? ctx.get("connection") : undefined;
+	const status = connection?.requestRejection?.(req);
+	return status === undefined ? undefined : { status, body: { ok: false, error: status === 401 ? "unauthorized" : "forbidden" } };
+}
+
 /** Which of the names above this context can actually resolve. */
 function visibleServices(ctx) {
 	if (typeof ctx.get !== "function") return [];
@@ -381,12 +488,31 @@ function visibleServices(ctx) {
  * @returns whether a wait was scheduled or the routes attached immediately.
  */
 export function registerRoutes(ctx, deps) {
+	let connectionServed = false;
+	let legacyDispose;
+	const attachConnection = (scoped) => {
+		const connection = typeof scoped.get === "function" ? scoped.get("connection") : scoped.connection;
+		if (typeof connection?.fetch?.register !== "function") return;
+		registerConnectionRoutes(scoped, connection, deps);
+		legacyDispose?.();
+		legacyDispose = undefined;
+		connectionServed = true;
+		scoped.on?.("dispose", () => { connectionServed = false; });
+		deps.logger?.info?.("tokenledger: serving %s via authenticated Connection (Desktop/Web)", BASE_PATH);
+	};
+	if (typeof ctx.inject === "function") ctx.inject(["connection"], attachConnection);
+	else attachConnection(ctx);
+
 	if (typeof ctx.inject !== "function") {
+		if (connectionServed) return true;
 		for (const name of WEB_SERVER_NAMES) {
 			const immediate = typeof ctx.get === "function" ? ctx.get(name) : undefined;
-			if (immediate !== undefined && typeof immediate.register === "function") return attachRoutes(ctx, immediate, deps);
+			if (immediate !== undefined && typeof immediate.register === "function") {
+				legacyDispose = attachRoutes(ctx, immediate, deps);
+				return true;
+			}
 		}
-		return false;
+		return connectionServed;
 	}
 
 	// A nested inject that never fires is invisible: no error, no log, and the
@@ -398,7 +524,7 @@ export function registerRoutes(ctx, deps) {
 	let attached = false;
 	// Injectable so a test can reach this branch without sleeping through it.
 	const nagging = setTimeout(() => {
-		if (attached) return;
+		if (attached || connectionServed) return;
 		deps.logger?.warn?.(
 			"tokenledger: still no web server after 10s — the panel will 404. Services this context can see: %s",
 			visibleServices(ctx).join(", ") || "(none)"
@@ -415,10 +541,11 @@ export function registerRoutes(ctx, deps) {
 			// are outstanding and only one composition can satisfy either, so the
 			// callback has to be able to decline.
 			const server = scoped?.[name];
-			if (attached || server === undefined || typeof server.register !== "function") return;
+			if (attached || connectionServed || server === undefined || typeof server.register !== "function") return;
 			attached = true;
 			clearTimeout(nagging);
-			attachRoutes(scoped, server, deps);
+			legacyDispose = attachRoutes(scoped, server, deps);
+			scoped.on?.("dispose", () => { attached = false; });
 			deps.logger?.info?.("tokenledger: serving %s and %s via %s", USAGE_PATH, BALANCE_PATH, name);
 		});
 	}
@@ -432,6 +559,12 @@ export function registerRoutes(ctx, deps) {
  */
 function attachRoutes(ctx, httpServer, deps) {
 	const logger = deps.logger;
+	const disposers = [];
+	const own = (factory, label) => {
+		const dispose = ctx.effect(factory, label);
+		disposers.push(dispose);
+		return dispose;
+	};
 
 	const send = (res, status, value) => {
 		const body = JSON.stringify(value);
@@ -443,13 +576,13 @@ function attachRoutes(ctx, httpServer, deps) {
 	};
 
 	const route = (path, build, label) => {
-		ctx.effect(
+		own(
 			() =>
 				httpServer.register({
 					kind: "exact",
 					path,
 					handler: async (req, res) => {
-						const refused = screenRequest(req);
+						const refused = screenHttpRequest(ctx, req);
 						if (refused !== undefined) return send(res, refused.status, refused.body);
 						try {
 							send(res, 200, await build(parseQuery(req.url), req.url));
@@ -493,13 +626,13 @@ function attachRoutes(ctx, httpServer, deps) {
 	// in `screenRequest`, the body is capped, and a failure lands here as a
 	// plain status the dialog can print.
 	if (typeof deps.userAuth === "function" || typeof deps.saveUserAuth === "function") {
-		ctx.effect(
+		own(
 			() =>
 				httpServer.register({
 					kind: "exact",
 					path: USERAUTH_PATH,
 					handler: async (req, res) => {
-						const refused = screenRequest(req);
+						const refused = screenHttpRequest(ctx, req);
 						if (refused !== undefined) return send(res, refused.status, refused.body);
 						try {
 							if (req.method === "POST" && typeof deps.saveUserAuth === "function") {
@@ -508,13 +641,13 @@ function attachRoutes(ctx, httpServer, deps) {
 								return send(res, 200, { ok: true });
 							}
 							if (req.method === "GET" && typeof deps.userAuth === "function") {
-								return send(res, 200, { ok: true, origins: deps.userAuth(originOf(req.url)) });
+								return send(res, 200, { ok: true, origins: await deps.userAuth(originOf(req.url)) });
 							}
 							send(res, 405, { ok: false, error: "method-not-allowed" });
 						} catch (error) {
-							const status = error?.kind === "payload-too-large" || error?.kind === "invalid-json" ? 400 : 500;
-							logger?.warn?.("tokenledger: %s failed: %s", USERAUTH_PATH, error?.message ?? error);
-							send(res, status, { ok: false, error: error?.kind ?? "internal" });
+							const failure = publicFailure(error);
+							logger?.warn?.("tokenledger: %s failed (%s)", USERAUTH_PATH, failure.reason);
+							send(res, failure.status, { ok: false, error: failure.reason });
 						}
 					}
 				}),
@@ -522,5 +655,9 @@ function attachRoutes(ctx, httpServer, deps) {
 		);
 	}
 
-	return true;
+	return () => {
+		for (const dispose of disposers.splice(0).reverse()) {
+			if (typeof dispose === "function") dispose();
+		}
+	};
 }

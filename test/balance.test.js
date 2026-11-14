@@ -468,6 +468,87 @@ test("a host that cannot be asked is unsupported, not an error", async () => {
 	assert.deepEqual(listAccounts({ get: () => undefined }), []);
 });
 
+test("current Config-backed accounts preserve relay identity and resolve only its credential reference", async () => {
+	const entry = { provider: "relay", settingsNs: "custom-pi", settingsPath: ["providers", "relay"], declared: true };
+	const v = value => ({ get: () => value, [Symbol.for("cosmokit.volatile.write")]: () => {} });
+	const requestedRefs = [];
+	const requests = [];
+	let configurations = 0;
+	const config = { providers: v({ relay: { baseURL: "https://relay-current.test/v1", apiKeyEnv: v("CURRENT_REF"), apiKey: "ignored-inline-secret" } }) };
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => [entry] },
+		configEditor: { configuration: () => { configurations++; return [{ entry: { id: "include:custom-pi", options: { id: "custom-pi" }, fiber: { state: 2, effectiveConfig: config } }, inherited: {}, override: {} }]; } },
+		settings: { describe: () => [{ ns: "custom-pi", value: {} }] },
+		credentials: { resolve: async ref => { requestedRefs.push(ref); return { value: "synthetic-resolved-key" }; } }
+	})[name] };
+	const accounts = listAccounts(context);
+	assert.equal(accounts[0].origin, "https://relay-current.test");
+	assert.equal(accounts[0].hasCredential, true);
+	assert.equal(JSON.stringify(accounts).includes("CURRENT_REF"), false);
+	assert.equal(JSON.stringify(accounts).includes("ignored-inline-secret"), false);
+	const read = createBalanceReader(context, {
+		softwareOf: new Map([["https://relay-current.test", "sub2api"]]),
+		fetch: async (url, init) => { requests.push({ url, authorization: init.headers.authorization }); return { ok: true, json: async () => ({ balance: 19, unit: "USD" }) }; }
+	});
+	const result = await read("relay");
+	assert.equal(result.total, 19);
+	assert.deepEqual(requestedRefs, ["CURRENT_REF"]);
+	assert.equal(requests[0].url, "https://relay-current.test/v1/usage");
+	assert.equal(requests[0].authorization, "Bearer synthetic-resolved-key");
+	assert.equal(configurations, 2, "list and request each obtain one configuration generation");
+});
+
+test("unknown no-endpoint routes never become DeepSeek balance accounts", () => {
+	assert.deepEqual(listAccounts(ctxWith([piAi("unknown")], { providers: { unknown: { apiKeyEnv: "NOT_DS" } } })), []);
+});
+
+test("current catalog defaultBaseURL names the correct vendor without a hardcoded route table", () => {
+	const configured = { ...piAi("moonshot-custom-name"), defaultBaseURL: "https://api.moonshot.cn/v1", declared: false };
+	const dormant = { ...piAi("dormant"), defaultBaseURL: "https://api.deepseek.com", declared: false };
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => [configured, dormant] },
+		configEditor: { configuration: () => [{ entry: { options: { id: "llm-pi-ai" }, fiber: { state: 2, effectiveConfig: { providers: { "moonshot-custom-name": { apiKeyEnv: "MOONSHOT_REF" } } } } } }] }
+	})[name] };
+	const accounts = listAccounts(context);
+	assert.equal(accounts.length, 1, "unconfigured catalog entries are not balance accounts");
+	assert.equal(accounts[0].displayName, "Moonshot");
+	assert.equal(accounts[0].origin, "https://api.moonshot.cn");
+	assert.equal(accounts[0].scheme, "moonshot");
+});
+
+test("a config update during fingerprinting cannot send the new credential to the previous origin", async () => {
+	let section = { providers: { relay: { baseURL: "https://old-relay.test/v1", apiKeyEnv: "OLD_REF" } } };
+	const resolved = [];
+	const sent = [];
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => [piAi("relay")] },
+		settings: { get: () => section },
+		credentials: { resolve: async ref => { resolved.push(ref); return { value: ref === "OLD_REF" ? "old-synthetic-key" : "new-synthetic-key" }; } }
+	})[name] };
+	const reader = createBalanceReader(context, {
+		detect: async () => {
+			section = { providers: { relay: { baseURL: "https://new-relay.test/v1", apiKeyEnv: "NEW_REF" } } };
+			return { billingAvailable: true, software: "sub2api" };
+		},
+		fetch: async (url, init) => { sent.push({ url, authorization: init.headers.authorization }); return { ok: true, json: async () => ({ balance: 2 }) }; }
+	});
+	await reader("relay");
+	assert.deepEqual(resolved, ["OLD_REF"]);
+	assert.equal(sent[0].url, "https://old-relay.test/v1/usage");
+	assert.equal(sent[0].authorization, "Bearer old-synthetic-key");
+});
+
+test("a synchronous credentials resolver failure becomes no-credential without upstream calls", async () => {
+	let calls = 0;
+	const reader = createBalanceReader(ctxWith([piAi("official")], { providers: { official: { baseURL: "https://api.deepseek.com", apiKeyEnv: "BROKEN_REF" } } }, {
+		resolve() { throw new Error("synthetic secret must not escape"); }
+	}), { fetch: async () => { calls++; throw new Error("must not call"); } });
+	const result = await reader("official");
+	assert.equal(result.reason, "no-credential");
+	assert.equal(JSON.stringify(result).includes("synthetic secret"), false);
+	assert.equal(calls, 0);
+});
+
 test("an unknown account id is named as such rather than silently answered", async () => {
 	const read = createBalanceReader(ctxWith([piAi("a")], { providers: { a: { baseURL: "https://x.example" } } }));
 	assert.equal((await read("nope")).reason, "unknown-account");

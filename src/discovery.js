@@ -49,6 +49,7 @@
  */
 
 import { domainOf, normalizeOrigin } from "./relay-sites.js";
+import { readProviderDirectory, readProviderPath } from "./provider-config.js";
 
 /**
  * Walk a dotted path into a resolved settings section.
@@ -60,12 +61,7 @@ import { domainOf, normalizeOrigin } from "./relay-sites.js";
  *   traversal leaves plain-object territory.
  */
 export function readAtPath(section, path = []) {
-	let cursor = section;
-	for (const key of path) {
-		if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return undefined;
-		cursor = cursor[key];
-	}
-	return cursor;
+	return readProviderPath(section, path);
 }
 
 /**
@@ -114,15 +110,26 @@ export function discoverSites(options = {}) {
 		const route = entry?.provider;
 		if (typeof route !== "string" || route === "") continue;
 
-		const profile = readAtPath(sectionFor(entry.settingsNs), entry.settingsPath ?? []);
-		const baseUrl = profile?.baseURL ?? profile?.baseUrl;
+		let profile;
+		let baseUrl;
+		try {
+			profile = options.profileFor === undefined
+				? readAtPath(sectionFor(entry.settingsNs), entry.settingsPath ?? [])
+				: options.profileFor(entry);
+			baseUrl = options.endpointFor === undefined
+				? (readAtPath(profile, ["baseURL"]) ?? readAtPath(profile, ["baseUrl"]) ?? entry.defaultBaseURL)
+				: options.endpointFor(entry);
+		} catch {
+			skipped++;
+			continue;
+		}
 		if (typeof baseUrl !== "string" || baseUrl === "") {
 			// A shipped catalog route with no override uses its vendor default. Keep
 			// the route in the directory as explicitly direct; dropping it here made
 			// the resolver later mistake that known official route for an unknown one.
 			const builtInDeepSeek =
 				route === "deepseek-official" && entry.settingsNs === "llm-deepseek" && entry.settingsPath?.length === 0;
-			if (entry.declared === false || builtInDeepSeek) {
+			if ((profile !== undefined || options.profileFor === undefined) && (entry.declared === false || builtInDeepSeek) && options.endpointFor === undefined) {
 				directProviders.push(route);
 				continue;
 			}
@@ -138,6 +145,12 @@ export function discoverSites(options = {}) {
 			continue;
 		}
 		providerBaseUrls[route] = baseUrl;
+		const catalogOrigin = normalizeOrigin(entry.defaultBaseURL);
+		const builtInDeepSeek = route === "deepseek-official" && entry.settingsPath?.length === 0;
+		if ((entry.declared === false && catalogOrigin === origin) || (builtInDeepSeek && origin === "https://api.deepseek.com")) {
+			directProviders.push(route);
+			continue;
+		}
 		if (official.has(origin)) continue;
 
 		const existing = byOrigin.get(origin);
@@ -175,23 +188,15 @@ export function discoverSites(options = {}) {
  *   distinguishes "no relays configured" from "this host cannot be asked".
  */
 export function discoverFromContext(ctx, options = {}) {
-	const llm = typeof ctx?.get === "function" ? ctx.get("llm") : undefined;
-	const settings = typeof ctx?.get === "function" ? ctx.get("settings") : undefined;
-	if (llm === undefined || settings === undefined) {
+	const directory = readProviderDirectory(ctx, options);
+	if (!directory.available) {
 		return { sites: [], providerBaseUrls: {}, directProviders: [], skipped: 0, available: false };
 	}
-
-	let providers;
-	try {
-		providers = llm.listConfigurableProviders?.() ?? [];
-	} catch {
-		return { sites: [], providerBaseUrls: {}, directProviders: [], skipped: 0, available: false };
-	}
-
 	return {
 		...discoverSites({
-			providers,
-			readSection: (ns) => settings.get?.(ns),
+			providers: directory.entries,
+			profileFor: directory.profileFor,
+			endpointFor: directory.endpointFor,
 			officialOrigins: options.officialOrigins
 		}),
 		available: true

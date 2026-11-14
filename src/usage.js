@@ -9,23 +9,19 @@
  * Aggregation semantics mirror `@deepseek-ai/dsh-token-meter`'s `tokenUsage`
  * projection:
  *
- * - A usage sample rides either an `assistant/chunk` whose
- *   `data.chunk.type === 'usage'`, or an `assistant/message` with `data.usage`.
- *   Collecting BOTH is load-bearing: a request that reported usage and then
- *   failed never produces an `assistant/message`, and the provider still bills
- *   it. Reading only `assistant/message` silently undercounts exactly the calls
- *   a user most wants explained when a relay invoice looks too high.
+ * - Current durable `assistant/message` and `assistant/attempt` events carry
+ *   compact streams. Prefer a message's explicit `data.usage`; otherwise take
+ *   only the stream's last accounting chunk. Legacy `assistant/chunk` usage
+ *   remains supported. Failed attempts can still be billable.
  * - A repeated sample for the same `(turn, step)` REPLACES the earlier value
- *   rather than adding to it, and the replacement is re-attributed to the day
- *   and route of the later event.
+ *   until `llm/retry-started` closes that step's replacement slot. The next
+ *   attempt then adds independently. Replacement follows the later day/route.
  *
  * Route attribution:
  *
- * - `assistant/message` names its own provider and model at
- *   `data.message.source` (`ModelMessageSource extends AssistantProvenance`).
- * - A usage chunk carries no provenance at all — `StreamChunk`'s usage variant
- *   is only `{ type: 'usage', usage }` — so an orphan chunk falls back to the
- *   most recent `request/header` at `data.header.config`.
+ * - `assistant/message` names its own provider and model in its message source.
+ * - Attempts without message provenance use the most recent request route from
+ *   `request/header.data.header.config` or `request/context.data`.
  * - Anything still unattributed lands in an explicit `unknown` bucket. It is
  *   never guessed.
  *
@@ -204,13 +200,26 @@ function subtractFrom(target, source) {
 	return target;
 }
 
-/** Extract the usage sample an event carries, if any. */
+/** Last accounting chunk from a compact durable stream; never inspect content chunks. */
+function streamUsageOf(stream) {
+	if (!Array.isArray(stream)) return undefined;
+	for (let index = stream.length - 1; index >= 0; index--) {
+		const record = stream[index];
+		if (record?.type === "chunk" && record.chunk?.type === "usage") return record.chunk.usage;
+	}
+	return undefined;
+}
+
+/** Extract one final usage sample per durable attempt (or a legacy live chunk). */
 function sampleOf(event) {
 	if (event.type === "assistant/chunk" && event.data?.chunk?.type === "usage") {
 		return { key: `${event.data.turn}:${event.data.step}`, usage: event.data.chunk.usage };
 	}
-	if (event.type === "assistant/message" && event.data?.usage !== undefined) {
-		return { key: `${event.data.turn}:${event.data.step}`, usage: event.data.usage };
+	if (event.type === "assistant/message" || event.type === "assistant/attempt") {
+		const usage = event.type === "assistant/message" && event.data?.usage !== undefined
+			? event.data.usage
+			: streamUsageOf(event.data?.stream);
+		if (usage !== undefined) return { key: `${event.data.turn}:${event.data.step}`, usage };
 	}
 	return undefined;
 }
@@ -228,7 +237,7 @@ function provenanceOf(event) {
 			model: source.model
 		};
 	}
-	const config = event.data?.header?.config;
+	const config = event.type === "request/context" ? event.data : event.data?.header?.config;
 	if (config !== undefined && typeof config.model === "string") {
 		return {
 			provider: typeof config.provider === "string" && config.provider.length > 0 ? config.provider : UNKNOWN,
@@ -298,9 +307,15 @@ export function applyUsageDelta(state, events, options = {}) {
 			state.consumedSeq = event.seq;
 		}
 
-		if (event.type === "request/header") {
+		if (event.type === "request/header" || event.type === "request/context") {
 			const provenance = provenanceOf(event);
 			if (provenance !== undefined) currentRoute = provenance;
+		}
+
+		if (event.type === "llm/retry-started" && last?.key === `${event.data?.turn}:${event.data?.step}`) {
+			// The preceding attempt is independently billable. A retry reuses
+			// (turn, step), but its settlement must add rather than replace it.
+			last = null;
 		}
 
 		const sample = sampleOf(event);

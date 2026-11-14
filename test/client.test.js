@@ -22,7 +22,13 @@ function fakeDom() {
 		head,
 		querySelector: (selector) =>
 			children.find((tag) => selector.includes(JSON.stringify(tag.dataset.pluginCss))) ?? null,
-		createElement: () => ({ dataset: {}, textContent: "" })
+		createElement: () => {
+			const tag = { dataset: {}, textContent: "", remove: () => {
+				const index = children.indexOf(tag);
+				if (index !== -1) children.splice(index, 1);
+			} };
+			return tag;
+		}
 	};
 }
 
@@ -91,6 +97,12 @@ async function loadBundle(options = {}) {
 
 	try {
 		await import(`../src/client.js?t=${Date.now()}`);
+		if (options.mountStyles !== false) {
+			materialized.apply({
+				effect: (run, label) => label === "tokenledger: styles" ? run() : undefined,
+				locale: {}, slots: {}
+			});
+		}
 	} finally {
 		globalThis.console = REAL_CONSOLE;
 	}
@@ -190,13 +202,18 @@ test("everything that floats asks for the overlay ground, with the page ground a
 	);
 	assert.equal(/backdrop-filter/.test(panel), false, "no forced blur: DSH's own wallpaper frost governs");
 
-	// The fallback is the whole point: a theme defining no overlay token has to
-	// render exactly as it did before.
-	assert.equal(
-		/background:var\(--dsw-alias-bg-base\)/.test(css),
-		false,
-		"a bare page-ground background is the bug; every one of them must carry the overlay fallback"
-	);
+	// Only floating surfaces require the overlay fallback. The full-page
+	// variant must use page ground, otherwise it paints a grey overlay sheet.
+	for (const selector of ["tkl_panel", "tkl_tip", "tkl_dlg"]) {
+		const rule = css.match(new RegExp(`\\.${selector}\\{[^}]*\\}`))[0];
+		assert.equal(/background:var\(--dsw-alias-bg-base\)/.test(rule), false);
+	}
+	const dialog = css.match(/\.tkl_dlg\{[^}]*\}/)[0];
+	assert.match(dialog, /background:var\(--dsw-alias-bg-layer-1\)/);
+	assert.equal(/color-mix|glass-opacity/.test(dialog), false);
+	assert.match(css.match(/\.tkl_stat\{[^}]*\}/)[0], /background:var\(--dsw-alias-bg-layer-1\)/);
+	assert.match(css.match(/\.tkl_input\{[^}]*\}/)[0], /background:var\(--dsw-alias-bg-base\)/);
+	assert.match(css.match(/\.tkl_panel\.tkl_page\{[^}]*\}/)[0], /background:var\(--dsw-alias-bg-base\)/);
 
 	// Elements that sit INSIDE the panel are a different case — they inherit its
 	// ground and must stay transparent, or they paint an opaque rectangle over
@@ -257,26 +274,26 @@ test("the account picker's dropdown states its own ground and label", async () =
 	assert.match(select, /color-scheme:var\(--tkl-scheme/, "or the popup's frame ignores the theme");
 });
 
-test("apply registers dictionaries and the footer seat", async () => {
+test("apply registers dictionaries and the legacy fallback when modern slots are absent", async () => {
 	const { exports } = await loadBundle();
 	const registered = [];
 	const dictionaries = [];
 	exports.apply({
-		effect: (fn) => fn(),
-		locale: { register: (ns, dicts) => dictionaries.push([ns, dicts]) },
+		effect: (fn, label) => label === "tokenledger: warm wallets" ? undefined : fn(),
+		locale: { register: (ns, dicts) => dictionaries.push([ns, dicts]), bind: () => (key) => key === "panel.title" ? "Pro title" : key },
 		slots: {
 			inject: (name, run) => {
-				assert.equal(name, "sidebar.footer.action", "the only seat open to third parties");
-				run();
+				if (name === "sidebar.footer.action") return run();
+				return () => {};
 			},
-			register: (spec, Component) => registered.push({ spec, Component })
+			register: (spec, Component) => { registered.push({ spec, Component }); return () => {}; }
 		}
 	});
 	assert.equal(dictionaries[0][0], "tokenLedger");
 	assert.deepEqual(Object.keys(dictionaries[0][1]).sort(), ["en", "zh"]);
-	assert.equal(registered[0].spec.id, "tokenledger");
+	assert.equal(registered[0].spec.id, "tokenledger-pro");
 	assert.equal(registered[0].spec.locale, "tokenLedger");
-	assert.equal(registered[0].Component, exports.TokenLedgerPanel);
+	assert.equal(registered[0].Component.name, "LegacyPanel");
 });
 
 test("the seat collapses to the rail when the sidebar does", async () => {
@@ -299,7 +316,7 @@ test("closed renders the badge alone; open adds the panel", async () => {
 test("translation falls back to words, never to raw keys", async () => {
 	const { exports } = await loadBundle();
 	// No locale service at all.
-	assert.equal(exports.translateWith(undefined)("panel.title"), "用量账本");
+	assert.equal(exports.translateWith(undefined)("panel.title"), "用量账本 Pro");
 	// A service that does not know the key echoes it back; that is not an answer.
 	assert.equal(exports.translateWith((k) => k)("action.close"), "关闭");
 	// A service that does know it wins.
@@ -1089,14 +1106,13 @@ test("the bundle announces each lifecycle step it reaches", async () => {
 	try {
 		exports.apply({
 			effect: (fn) => fn(),
-			locale: { register() {} },
+			locale: { register() {}, bind: () => (key) => key },
 			slots: { inject: (_n, run) => run(), register() {} }
 		});
 	} finally {
 		globalThis.console = REAL_CONSOLE;
 	}
-	assert.ok(seatLogs.join("\n").includes("registering the footer seat"));
-	assert.ok(seatLogs.join("\n").includes("sidebar.footer.action is available"));
+	assert.ok(seatLogs.join("\n").includes("registering the ledger panel"));
 });
 
 test("a locale service that throws costs the dictionaries, not the seat", async () => {
@@ -1118,7 +1134,7 @@ test("a locale service that throws costs the dictionaries, not the seat", async 
 	} finally {
 		globalThis.console = REAL_CONSOLE;
 	}
-	assert.equal(registered.length, 1, "the seat must still be taken");
+	assert.equal(registered.length, 4, "modern navigation, settings and the hidden legacy fallback must still register");
 });
 
 test("the footer-action container is made to wrap, or a second plugin lands off-screen", async () => {

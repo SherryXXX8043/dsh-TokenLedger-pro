@@ -179,17 +179,16 @@ export function createNewApiWalletReader() {
  * @param account - one of `listAccounts`' entries: `{ origin, scheme, ... }`.
  * @param auth - the origin's stored entry: `{ userId, token }` or undefined.
  */
+export function isWalletAccount(account) {
+	const knownNonNewApi = new Set(["deepseek", "openrouter", "moonshot", "zai", "kimi", "minimax", "opencode-go", "sub2api"]);
+	return account !== null && typeof account === "object" && typeof account.origin === "string" && account.origin !== "" && !knownNonNewApi.has(account.scheme);
+}
+
 export function shouldUseWallet(account, auth) {
-	const KNOWN_NON_NEWAPI = new Set([
-		"deepseek", "openrouter", "moonshot", "zai", "kimi", "minimax", "opencode-go", "sub2api"
-	]);
 	if (auth === null || typeof auth !== "object") return false;
 	if (typeof auth.token !== "string" || auth.token === "") return false;
 	if (typeof auth.userId !== "number" || !Number.isInteger(auth.userId) || auth.userId <= 0) return false;
-	if (account === null || typeof account !== "object" || typeof account.origin !== "string" || account.origin === "") {
-		return false;
-	}
-	return !KNOWN_NON_NEWAPI.has(account.scheme);
+	return isWalletAccount(account);
 }
 
 /**

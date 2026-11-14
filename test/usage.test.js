@@ -28,7 +28,7 @@ let seq = 0;
 const ev = (type, data, time = DAY_A) => ({ type, seq: seq++, time, data });
 
 const header = (provider, model, time = DAY_A, reason = "initial") =>
-	ev("request/header", { header: { config: { provider, model }, reason } }, time);
+	ev("request/header", { header: { config: { provider, model } }, reason }, time);
 
 const usageChunk = (turn, step, usage, time = DAY_A) =>
 	ev("assistant/chunk", { turn, step, chunk: { type: "usage", usage } }, time);
@@ -37,6 +37,88 @@ const message = (turn, step, provider, model, usage, time = DAY_A) =>
 	ev("assistant/message", { turn, step, message: { role: "assistant", source: { kind: "model", provider, model } }, usage }, time);
 
 const usage = (input, output, extra = {}) => ({ inputTokens: input, outputTokens: output, ...extra });
+
+const durableStream = (...samples) => samples.map((sample) => ({
+	type: "chunk", time: DAY_A, chunk: { type: "usage", usage: sample }
+}));
+const attempt = (turn, step, stream, time = DAY_A) => ev("assistant/attempt", { turn, step, stream }, time);
+
+test("a durable failed attempt counts only its final stream usage", () => {
+	const days = foldUsage([
+		header("p", "m"),
+		attempt(1, 1, durableStream(usage(10, 1), usage(100, 20)))
+	]);
+	assert.equal(sumRange(days).inputTokens, 100);
+	assert.equal(sumRange(days).outputTokens, 20);
+	assert.equal(sumRange(days).requests, 1);
+});
+
+test("a durable message falls back to stream usage and prefers its explicit usage", () => {
+	const streamOnly = message(1, 1, "p", "m", undefined);
+	streamOnly.data.stream = durableStream(usage(100, 20));
+	const explicit = message(1, 2, "p", "m", usage(200, 40));
+	explicit.data.stream = durableStream(usage(999, 999));
+	assert.equal(sumRange(foldUsage([streamOnly, explicit])).inputTokens, 300);
+	assert.equal(sumRange(foldUsage([streamOnly, explicit])).outputTokens, 60);
+});
+
+test("retry boundaries retain each independently billed attempt of the same step", () => {
+	const days = foldUsage([
+		header("p", "m"),
+		attempt(1, 1, durableStream(usage(100, 10))),
+		ev("llm/retry-started", { turn: 1, step: 1 }),
+		attempt(1, 1, durableStream(usage(200, 20))),
+		ev("llm/retry-started", { turn: 1, step: 1 }),
+		message(1, 1, "p", "m", usage(300, 30))
+	]);
+	assert.equal(sumRange(days).inputTokens, 600);
+	assert.equal(sumRange(days).outputTokens, 60);
+	assert.equal(sumRange(days).requests, 3);
+});
+
+test("settlement replacement still works across slices but matching retry opens a new slot", () => {
+	const state = createUsageState();
+	applyUsageDelta(state, [header("p", "m"), attempt(1, 1, durableStream(usage(100, 10)))]);
+	applyUsageDelta(state, [message(1, 1, "p", "m", usage(150, 15))]);
+	assert.equal(sumRange(state.days).inputTokens, 150);
+	assert.equal(sumRange(state.days).requests, 1);
+	applyUsageDelta(state, [ev("llm/retry-started", { turn: 1, step: 1 })]);
+	applyUsageDelta(state, [attempt(1, 1, durableStream(usage(200, 20)))]);
+	assert.equal(sumRange(state.days).inputTokens, 350);
+	assert.equal(sumRange(state.days).requests, 2);
+});
+
+test("a retry marker for another step does not clear the replacement slot", () => {
+	const days = foldUsage([
+		message(1, 1, "p", "m", usage(100, 10)),
+		ev("llm/retry-started", { turn: 2, step: 1 }),
+		message(1, 1, "p", "m", usage(200, 20))
+	]);
+	assert.equal(sumRange(days).inputTokens, 200);
+	assert.equal(sumRange(days).requests, 1);
+});
+
+test("current request context attributes attempts while message provenance remains authoritative", () => {
+	const days = foldUsage([
+		header("old", "old-model"),
+		ev("request/context", { provider: "new", model: "new-model" }),
+		attempt(1, 1, durableStream(usage(100, 10))),
+		message(1, 2, "self", "self-model", usage(200, 20))
+	], { resolveSite: (provider) => provider });
+	const routes = days.get("2026-08-14").routes;
+	assert.equal(routes.get(routeKey("new", "new", "new-model")).inputTokens, 100);
+	assert.equal(routes.get(routeKey("self", "self", "self-model")).inputTokens, 200);
+});
+
+test("content-only settlements produce no accounting and content payloads are never traversed", () => {
+	const text = { type: "text-chunks", get texts() { throw new Error("content must not be inspected"); } };
+	const days = foldUsage([
+		attempt(1, 1, [text]),
+		attempt(1, 2, [text, ...durableStream(usage(100, 10))])
+	]);
+	assert.equal(sumRange(days).inputTokens, 100);
+	assert.equal(sumRange(days).requests, 1);
+});
 
 test("a plain turn counts once from its assistant/message", () => {
 	const days = foldUsage([header("deepseek", "v4"), message(1, 1, "deepseek", "v4", usage(100, 50))]);

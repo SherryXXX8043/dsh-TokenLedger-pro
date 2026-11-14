@@ -204,6 +204,80 @@ test("an llm service that throws degrades instead of taking the plugin down", ()
 	});
 });
 
+// --- current Config-backed directory -----------------------------------------
+
+const currentConfigRow = (ns, config) => ({ entry: { id: `include:${ns}`, options: { id: ns }, fiber: { state: 2, effectiveConfig: config } }, inherited: {}, override: {} });
+const live = (value) => ({ get: () => value, [Symbol.for("cosmokit.volatile.write")]: () => {} });
+
+test("current ConfigEditor discovers ordinary endpoint fields omitted by Settings.describe", () => {
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => [piAi("relay", true)] },
+		configEditor: { configuration: () => [currentConfigRow("llm-pi-ai", { providers: live({ relay: { baseURL: "https://current-relay.test/v1", apiKeyEnv: "REF_ONLY", apiKey: "synthetic-secret" } }) })] },
+		settings: { describe: options => { assert.equal(options.redactSecrets, true); return [{ ns: "llm-pi-ai", value: {} }]; } }
+	})[name] };
+	const result = discoverFromContext(context);
+	assert.equal(result.available, true);
+	assert.deepEqual(result.providerBaseUrls, { relay: "https://current-relay.test/v1" });
+	assert.deepEqual(result.sites[0].routes, ["relay"]);
+	assert.equal(JSON.stringify(result).includes("synthetic-secret"), false);
+	assert.equal(JSON.stringify(result).includes("REF_ONLY"), false);
+});
+
+test("catalog default endpoints are direct while overridden catalog routes are relays", () => {
+	const providers = [
+		{ ...piAi("catalog", false), defaultBaseURL: "https://catalog.test/v1" },
+		{ ...piAi("overridden", false), defaultBaseURL: "https://catalog.test/v1" }
+	];
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => providers },
+		configEditor: { configuration: () => [currentConfigRow("llm-pi-ai", { providers: live({ catalog: {}, overridden: { baseURL: "https://relay.test/v1" } }) })] }
+	})[name] };
+	const result = discoverFromContext(context);
+	assert.equal(result.available, true);
+	assert.deepEqual(result.directProviders, ["catalog"]);
+	assert.deepEqual(result.providerBaseUrls, { catalog: "https://catalog.test/v1", overridden: "https://relay.test/v1" });
+	assert.deepEqual(result.sites.map(site => site.id), ["relay.test"]);
+});
+
+test("a custom provider's defaultBaseURL remains a relay even when its profile has no override", () => {
+	const providers = [
+		{ ...piAi("custom", true), defaultBaseURL: "https://custom-relay.test/v1" },
+		{ ...piAi("unspecified", undefined), defaultBaseURL: "https://unspecified-relay.test/v1" }
+	];
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => providers },
+		configEditor: { configuration: () => [currentConfigRow("llm-pi-ai", { providers: { custom: {}, unspecified: {} } })] }
+	})[name] };
+	const result = discoverFromContext(context);
+	assert.equal(result.available, true);
+	assert.deepEqual(result.directProviders, []);
+	assert.deepEqual(result.sites.map(site => site.id), ["custom-relay.test", "unspecified-relay.test"]);
+	assert.equal(result.sites[0].declared, true);
+});
+
+test("a current Settings service without readable provider namespaces is unavailable, not all direct", () => {
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => [{ ...piAi("catalog", false), defaultBaseURL: "https://catalog.test" }] },
+		settings: { describe: () => [{ ns: "unrelated", value: {} }] },
+		configEditor: { configuration: () => [] }
+	})[name] };
+	const result = discoverFromContext(context);
+	assert.equal(result.available, false);
+	assert.deepEqual(result.directProviders, []);
+});
+
+test("unknown configured routes without an endpoint stay unresolved", () => {
+	const context = { get: name => ({
+		llm: { listConfigurableProviders: () => [piAi("custom", true)] },
+		configEditor: { configuration: () => [currentConfigRow("llm-pi-ai", { providers: { custom: {} } })] }
+	})[name] };
+	const result = discoverFromContext(context);
+	assert.equal(result.available, true);
+	assert.equal(result.skipped, 1);
+	assert.deepEqual(result.directProviders, []);
+	assert.deepEqual(result.sites, []);
+});
+
 // --- merging ----------------------------------------------------------------
 
 test("a hand-written site overrides the discovered one, because it is the correction", () => {
